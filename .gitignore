@@ -3,3 +3,21 @@ testing.ipynb
 testing.py
 ssh_key
 ssh_key.pub
+build
+dist
+Preprocessing/__pycache__
+Preprocessing/build
+Preprocessing/dist
+Preprocessing/Воронка ВБ Эталон.xlsx
+Preprocessing/Dashboard_WB_Preprocessing.exe
+Preprocessing/Dashboard_WB_Preprocessing.spec
+Preprocessing/Dashboard_OZON_Preprocessing.exe
+Preprocessing/Dashboard_OZON_Preprocessing.spec
+_temp_config.py
+_temp_DashboardAssemblyOZ.py
+_temp_DashboardAssemblyWB.py
+Dashboard_WB_Assembly.exe
+Dashboard_WB_Assembly.spec
+Dashboard_OZ_Assembly.exe
+Dashboard_OZ_Assembly.spec
+logs.log
