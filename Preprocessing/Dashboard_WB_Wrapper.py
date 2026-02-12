@@ -277,8 +277,9 @@ def update_zatraty_wb2():
         wb.Close()
         excel.Quit()
 
-# ▶️ Запуск всех этапов
-if __name__ == "__main__":
+
+def main():
+    """Main execution function for Dashboard WB Wrapper"""
     logs = open('logs.log', 'a')
     logs.write(f'{datetime.now()} - WB Dashboard Wrapper ran\n')
 
@@ -293,3 +294,8 @@ if __name__ == "__main__":
 
     logs = open('logs.log', 'a')
     logs.write(f'{datetime.now()} - WB Dashboard Wrapper completed\n')
+    logs.close()
+
+# ▶️ Запуск всех этапов
+if __name__ == "__main__":
+    main()
