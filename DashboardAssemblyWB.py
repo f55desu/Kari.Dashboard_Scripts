@@ -1,5 +1,4 @@
 import os
-import pandas as pd
 from sqlalchemy import create_engine
 import pyodbc
 import win32com.client as win32
@@ -8,6 +7,7 @@ import shutil
 import re
 from functools import reduce
 import numpy as np
+import pandas as pd
 
 # Функция для форматирования даты в строковый формат 'DD.MM.YYYY'
 def format_date_column(df, date_column):
@@ -43,8 +43,7 @@ def handle_errors(df):
         if df[col].dtype == 'object':
             df[col] = df[col].apply(lambda x: None if isinstance(x, str) and x.strip() == '' else x)
     return df
-
-# Constants
+ # Constants
 FOLDER_PATH = os.path.normpath(r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!")
 FOLDER_PATH_FEATURES = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Дашбоард по рекламным кампаниям"
 FOLDER_PATH_FOR_DB = os.path.normpath(r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям")
@@ -55,6 +54,8 @@ SQL_DATABASE_DBREPORT = "DBReport"
 SQL_DATABASE_DBPARTNERS = "DBPartners"
 
 def assemble():
+    """Главная функция сборки дашборда WB"""
+   
     # 1. Получить данные из файла "Затраты ВБ_2.xlsx"
     try:
         print("Начинаем получать данные для Затрат ВБ...")
@@ -1567,4 +1568,5 @@ def assemble():
     except Exception as e:
         print(f"Ошибка при обработке файла 'Показы и затраты ВБ_2.0.xlsx': {e}")
 
-assemble()
+if __name__ == "__main__":
+    assemble()

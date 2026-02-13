@@ -1,10 +1,10 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import os
-import sys
-import threading
-import subprocess
 from datetime import datetime
+
+# Direct import of assembly script
+import DashboardAssemblyOZ
 
 
 class DashboardAssemblyOZGUI:
@@ -105,7 +105,7 @@ class DashboardAssemblyOZGUI:
         run_button = tk.Button(
             button_frame,
             text="▶️ Запустить сборку базы данных",
-            command=self.run_script,
+            command=self.run_assembly,
             font=("Arial", 12, "bold"),
             bg="#4248f5",
             fg="white",
@@ -315,64 +315,32 @@ class DashboardAssemblyOZGUI:
         self.root.update()
         
     def run_assembly(self):
-        """Запускает скрипт сборки дашборда в отдельном потоке"""
+        """Запускает скрипт сборки дашборда"""
         # Очистка лога
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
         
-        # Запускаем в отдельном потоке чтобы не блокировать GUI
-        thread = threading.Thread(target=self._run_assembly_thread, daemon=True)
-        thread.start()
-        
-    def _run_assembly_thread(self):
-        """Внутренний метод для запуска Assembly скрипта в потоке"""
-        assembly_file = "DashboardAssemblyOZ.py"
-        assembly_path = os.path.join(os.path.dirname(__file__), assembly_file)
-        
-        if not os.path.exists(assembly_path):
-            self.log_message(f"❌ ОШИБКА: Файл {assembly_file} не найден!")
-            messagebox.showerror("Ошибка", f"Файл {assembly_file} не найден!")
-            return
-            
-        self.log_message(f"▶️ Запуск скрипта: {assembly_file}")
+        self.log_message("▶️ Запуск скрипта: DashboardAssemblyOZ.py")
         self.log_message("📦 Сборка дашборда OZON...")
         self.log_message("─" * 60)
         
         try:
-            # Запускаем скрипт как отдельный процесс с перехватом вывода
-            process = subprocess.Popen(
-                [sys.executable, assembly_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True
-            )
+            # Вызываем main() функцию напрямую
+            self.log_message("🔄 Выполнение скрипта сборки дашборда OZON...")
+            DashboardAssemblyOZ.assemble()
+            self.log_message("✅ Скрипт выполнен успешно")
             
-            # Читаем вывод построчно в реальном времени
-            for line in process.stdout:
-                line = line.rstrip()
-                if line:
-                    self.log_message(line)
+            self.log_message("─" * 60)
+            self.log_message("🎉 СБОРКА ДАШБОРДА ЗАВЕРШЕНА!")
             
-            # Ждём завершения процесса
-            return_code = process.wait()
+            # Записываем в лог-файл
+            logs = open('logs.log', 'a')
+            logs.write(f'{datetime.now()} - DashboardAssemblyOZ.py completed via GUI\n')
+            logs.close()
             
-            if return_code == 0:
-                self.log_message("─" * 60)
-                self.log_message("🎉 СКРИПТ УСПЕШНО ВЫПОЛНЕН!")
-                
-                # Записываем в лог-файл
-                logs = open('logs.log', 'a')
-                logs.write(f'{datetime.now()} - {assembly_file} completed via GUI\n')
-                logs.close()
-                
-                messagebox.showinfo("Успех", "Скрипт успешно выполнен!")
-            else:
-                self.log_message(f"❌ Скрипт завершился с кодом ошибки: {return_code}")
-                messagebox.showerror("Ошибка", f"Скрипт завершился с ошибкой (код {return_code})")
-                
+            messagebox.showinfo("Успех", "Скрипт успешно выполнен!")
+            
         except Exception as e:
             error_message = f"❌ ОШИБКА: {str(e)}"
             self.log_message(error_message)
@@ -380,7 +348,7 @@ class DashboardAssemblyOZGUI:
             
             # Записываем ошибку в лог-файл
             logs = open('logs.log', 'a')
-            logs.write(f'{datetime.now()} - ERROR in {assembly_file}: {str(e)}\n')
+            logs.write(f'{datetime.now()} - ERROR in DashboardAssemblyOZ.py: {str(e)}\n')
             logs.close()
 
 

@@ -1,10 +1,10 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os
-import sys
-import threading
-import subprocess
 from datetime import datetime
+
+# Direct import of assembly script
+import DashboardAssemblyWB
 
 
 class DashboardAssemblyWBGUI:
@@ -297,80 +297,33 @@ class DashboardAssemblyWBGUI:
         self.log_text.config(state=tk.DISABLED)
         self.root.update()
         
+        
     def run_assembly(self):
-        """Запускает скрипт сборки дашборда в отдельном потоке"""
+        """Запускает скрипт сборки дашборда"""
         # Очистка лога
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
         
-        # Запускаем в отдельном потоке чтобы не блокировать GUI
-        thread = threading.Thread(target=self._run_assembly_thread, daemon=True)
-        thread.start()
-        
-    def _run_assembly_thread(self):
-        """Внутренний метод для запуска Assembly скрипта в потоке"""
-        assembly_file = "DashboardAssemblyWB.py"
-        assembly_path = os.path.join(os.path.dirname(__file__), assembly_file)
-        
-        if not os.path.exists(assembly_path):
-            self.log_message(f"❌ ОШИБКА: Файл {assembly_file} не найден!")
-            messagebox.showerror("Ошибка", f"Файл {assembly_file} не найден!")
-            return
-            
-        self.log_message(f"▶️ Запуск скрипта: {assembly_file}")
+        self.log_message("▶️ Запуск скрипта: DashboardAssemblyWB.py")
         self.log_message("📦 Сборка дашборда WB...")
         self.log_message("─" * 60)
         
         try:
-            f'FOLDER_PATH_FEATURES = r"{self.folder_path_features_var.get()}"'
+            # Вызываем assemble() функцию напрямую
+            self.log_message("🔄 Выполнение скрипта сборки дашборда WB...")
+            DashboardAssemblyWB.assemble()
+            self.log_message("✅ Скрипт выполнен успешно")
             
-            # Заменяем FOLDER_PATH_FOR_DB
-            modified_script = modified_script.replace(
-                'FOLDER_PATH_FOR_DB = os.path.normpath(r"\\\\kari.local\\public\\all\\Analytics\\Marketplaceanalytics\\Федоров\\Дашбоард по рекламным кампаниям")',
-                f'FOLDER_PATH_FOR_DB = os.path.normpath(r"{self.folder_path_for_db_var.get()}")'
-            )
-            
-            # Заменяем FOLDER_PATH_DUDL
-            modified_script = modified_script.replace(
-                'FOLDER_PATH_DUDL = os.path.normpath(r"\\\\kari.local\\public\\all\\Агрегаторы\\Дашборд реклама WB_OZ")',
-                f'FOLDER_PATH_DUDL = os.path.normpath(r"{self.folder_path_dudl_var.get()}")'
-            )
-            
-            # Сохраняем временный скрипт
-            temp_script_path = os.path.join(os.path.dirname(__file__), "_temp_DashboardAssemblyWB.py")
-            with open(temp_script_path, 'w', encoding='utf-8') as f:
-                f.write(modified_script)
-            
-            self.log_message("📝 Временный скрипт с измененными путями создан")
-            self.log_message("🚀 Запуск скрипта... (окно консоли откроется отдельно)")
-            
-            # Запускаем скрипт в отдельном окне консоли
-            if sys.platform == "win32":
-                # Для Windows используем cmd с ключом /K чтобы окно не закрывалось
-                process = subprocess.Popen(
-                    ['cmd', '/c', 'start', 'cmd', '/K', 'python', temp_script_path],
-                    shell=True
-                )
-            else:
-                process = subprocess.Popen(['python', temp_script_path])
-            
-            self.log_message("✅ Скрипт запущен в отдельном окне консоли")
-            self.log_message("📌 Следите за прогрессом в окне консоли")
             self.log_message("─" * 60)
-            self.log_message("ℹ️ После завершения работы скрипта можно закрыть это окно")
+            self.log_message("🎉 СБОРКА ДАШБОРДА ЗАВЕРШЕНА!")
             
             # Записываем в лог-файл
             logs = open('logs.log', 'a')
-            logs.write(f'{datetime.now()} - DashboardAssemblyWB.py started via GUI\n')
+            logs.write(f'{datetime.now()} - DashboardAssemblyWB.py completed via GUI\n')
             logs.close()
             
-            messagebox.showinfo(
-                "Скрипт запущен", 
-                "Скрипт запущен в отдельном окне консоли.\n\n"
-                "Следите за прогрессом в открывшемся окне.\n"
-                "Это окно можно закрыть."
-            )
+            messagebox.showinfo("Успех", "Скрипт успешно выполнен!")
             
         except Exception as e:
             error_message = f"❌ ОШИБКА: {str(e)}"
