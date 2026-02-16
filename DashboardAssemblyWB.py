@@ -215,9 +215,6 @@ def assemble():
         return out
 
 
-    import numpy as np
-    import pandas as pd
-
     # ===================== ПАРАМЕТРЫ =====================
 
     # Если в справочнике встречаются "Единая Ставка"/"Ручная Ставка" — нормализуем
@@ -1257,8 +1254,6 @@ def assemble():
 
 
     # 22. Преобразование данных по ассоциациям  
-    import numpy as np
-    import pandas as pd
 
     DDMMYYYY = re.compile(r'^\d{2}\.\d{2}\.\d{4}$')   # 01.09.2025
     ISO      = re.compile(r'^\d{4}-\d{2}-\d{2}$')     # 2025-09-01

@@ -5,10 +5,11 @@ import win32com.client as win32
 import time  # Для измерения времени выполнения
 import shutil
 import re
-from glob import glob
+import glob
+# from glob import glob
 # from glob import glob
 import gc
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 # Функция для форматирования времени в часы, минуты и секунды
 def format_elapsed_time(seconds):
@@ -56,6 +57,10 @@ FOLDER_PATH_DUDL = os.path.normpath(r"\\kari.local\public\all\Агрегатор
 SQL_SERVER = "cl01sql"
 SQL_DATABASE_DBREPORT = "DBReport"
 SQL_DATABASE_DBPARTNERS = "DBPartners"
+# Папки
+path_voronka = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\ВЫГРУЗКА воронка Озон"
+path_zatraty = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\Озон. Затраты из Аналитики"
+
 
 def assemble():
     """Главная функция сборки дашборда OZON"""    
@@ -63,17 +68,7 @@ def assemble():
     start_all_time = time.time()
     engine = connect_to_sql(SQL_SERVER, SQL_DATABASE_DBPARTNERS)
 
-    # 1. Воронка
-    import pandas as pd
-    import glob
-    import os
-    import datetime
-    import pyodbc
-
-    # Папки
-    path_voronka = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\ВЫГРУЗКА воронка Озон"
-    path_zatraty = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\Озон. Затраты из Аналитики"
-
+    
     # === 1. ВОРОНКА ===
     df_voronka_list = []
     files_voronka = glob.glob(os.path.join(path_voronka, "analytics_report_*.xlsx"))
@@ -412,9 +407,6 @@ def assemble():
     df_reference = df_reference.drop_duplicates(subset=["Артикул"])
     df_reference = df_reference[["Артикул", "Бизнес-группа", "Направление", "Розничный отдел", "Группа", "Модель", "Бренд", "Коллекция", "Сезон", "Себестоимость с НДС", "Процент выкупа", "Две последние коллекции", 'Артикул OZ', 'Наименование', 'Техсегмент', 'Байер', 'Основной артикул', 'НДС', 'Ответственный за группу', 'Группа для отчетов']]
     df_reference
-
-    import pandas as pd
-    import numpy as np
 
     NBSP = '\u00A0'
 
@@ -1075,9 +1067,6 @@ def assemble():
         'Рекламные заказано товаров', 'Рекламные показы',
         'Рекламные показы на карточке товара', 'Цена'
         ]
-
-    import numpy as np
-    import pandas as pd
 
     def build_funnel_wide(
         df_raw: pd.DataFrame,

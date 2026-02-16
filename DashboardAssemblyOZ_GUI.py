@@ -325,6 +325,10 @@ class DashboardAssemblyOZGUI:
         self.log_message("📦 Сборка дашборда OZON...")
         self.log_message("─" * 60)
         
+        # # Перенаправляем stdout в лог
+        # old_stdout = sys.stdout
+        # sys.stdout = StdoutRedirector(self.log_text)
+        
         try:
             # Вызываем main() функцию напрямую
             self.log_message("🔄 Выполнение скрипта сборки дашборда OZON...")
@@ -350,6 +354,10 @@ class DashboardAssemblyOZGUI:
             logs = open('logs.log', 'a')
             logs.write(f'{datetime.now()} - ERROR in DashboardAssemblyOZ.py: {str(e)}\n')
             logs.close()
+            
+        # finally:
+        #     # Возвращаем stdout обратно
+        #     sys.stdout = old_stdout
 
 
 def main():
