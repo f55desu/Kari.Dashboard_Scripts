@@ -5,9 +5,7 @@ import win32com.client as win32
 import time  # Для измерения времени выполнения
 import shutil
 import re
-import glob
-# from glob import glob
-# from glob import glob
+from glob import glob
 import gc
 from datetime import timedelta, datetime
 
@@ -68,18 +66,18 @@ def assemble():
     start_all_time = time.time()
     engine = connect_to_sql(SQL_SERVER, SQL_DATABASE_DBPARTNERS)
 
-    
+
     # === 1. ВОРОНКА ===
     df_voronka_list = []
-    files_voronka = glob.glob(os.path.join(path_voronka, "analytics_report_*.xlsx"))
+    files_voronka = glob(os.path.join(path_voronka, "analytics_report_*.xlsx"))
 
     for file in files_voronka:
         # достаём дату из имени файла
         fname = os.path.basename(file)
         try:
-            report_date = str(datetime.datetime.strptime(fname.split("_")[2], "%Y-%m-%d").date() - datetime.timedelta(days=1))
+            report_date = str(datetime.strptime(fname.split("_")[2], "%Y-%m-%d").date() - timedelta(days=1))
         except Exception:
-            continue
+            raise Exception("Невозможно определить дату из имени файла:", fname)
 
         df = pd.read_excel(file, engine='calamine')
 

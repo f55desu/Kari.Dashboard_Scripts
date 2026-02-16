@@ -325,10 +325,6 @@ class DashboardAssemblyOZGUI:
         self.log_message("📦 Сборка дашборда OZON...")
         self.log_message("─" * 60)
         
-        # # Перенаправляем stdout в лог
-        # old_stdout = sys.stdout
-        # sys.stdout = StdoutRedirector(self.log_text)
-        
         try:
             # Вызываем main() функцию напрямую
             self.log_message("🔄 Выполнение скрипта сборки дашборда OZON...")
