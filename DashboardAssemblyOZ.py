@@ -444,7 +444,7 @@ def assemble():
     def merge_voronka_costs_preserve_impressions(
         df_voronka: pd.DataFrame,
         df_costs: pd.DataFrame,
-        df_prices: pd.DataFrame | None = None,
+        df_prices: pd.DataFrame,
         *,
         left_key_candidates=('Ozon ID','OZON ID','OZON_ID','Артикул OZ','Артикул'),
         right_key='SKU',
@@ -457,7 +457,7 @@ def assemble():
         # --- копии + даты ---
         df_v = df_voronka.copy()
         df_z = df_costs.copy()
-        df_p = None if df_prices is None else df_prices.copy()
+        df_p = df_prices.copy()
 
         for dframe in (df_v, df_z) + ((df_p,) if df_p is not None else ()):
             if dframe is not None and 'Дата' in dframe.columns:
@@ -798,13 +798,18 @@ def assemble():
     df_funnel_final = merge_voronka_costs_preserve_impressions(
         df_voronka=df_voronka_clean,
         df_costs=df_zatraty_clean,
-        df_prices=df_prices if df_prices_exists else None,
+        df_prices=df_prices, #if df_prices_exists else None,
         preserve_cols=('Показы, всего',),
         left_key_candidates=('Артикул OZ',),    # ← теперь одинаковое название!
         right_key='Артикул OZ',                 # ← и тут тоже!
         add_tail=False,
         type_col_candidates=('ТипАктивности',)
     )
+
+    print(f"Цена1: {df_funnel_final.head()}")
+    print(f"Цена1: {list(df_funnel_final.columns)}")
+    print(f"Цена1: {df_funnel_final['Цена']}")
+    
 
     print("\n✅ Мерж завершён!")
 
@@ -888,7 +893,7 @@ def assemble():
             'Заказы, шт': 'sum',     # суммируем заказы
         })
     )
-    df_union_agg
+    # df_union_agg
 
     df_all=df_all.drop_duplicates(subset=['Дата','Артикул OZ'])
 
