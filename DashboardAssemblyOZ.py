@@ -88,7 +88,7 @@ def assemble():
         try:
             report_date = str(datetime.datetime.strptime(fname.split("_")[2], "%Y-%m-%d").date() - timedelta(days=1))
         except Exception:
-            continue
+            raise Exception("Невозможно определить дату из имени файла:", fname)
 
         df = pd.read_excel(file, engine='calamine')
 
