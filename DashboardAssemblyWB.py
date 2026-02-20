@@ -8,6 +8,8 @@ import re
 from functools import reduce
 import numpy as np
 import pandas as pd
+import pyarrow as pa
+import pyarrow.csv as csv
 
 # Функция для форматирования даты в строковый формат 'DD.MM.YYYY'
 def format_date_column(df, date_column):
@@ -1430,8 +1432,6 @@ def assemble():
 
 
     # 23. Сохранить df_alloc в csv
-    import pyarrow as pa
-    import pyarrow.csv as csv
     table = pa.Table.from_pandas(df_alloc)
     csv.write_csv(table, os.path.join(FOLDER_PATH, "ДБсПризнаками.csv"))
 

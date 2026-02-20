@@ -6,12 +6,15 @@ import win32com.client as win32
 import time  # Для измерения времени выполнения
 import shutil
 import re
+import pyodbc
 from glob import glob
 # from glob import glob
 import gc
 from datetime import timedelta
 import datetime
 # from datetime import datetime
+import pyarrow as pa
+import pyarrow.csv as csv
 
 # Функция для форматирования времени в часы, минуты и секунды
 def format_elapsed_time(seconds):
@@ -1395,8 +1398,6 @@ def assemble():
 
     # 21. Сохранить df_final_db_all_features в csv
     # Сохранение финальной таблицы
-    import pyarrow as pa
-    import pyarrow.csv as csv
     table = pa.Table.from_pandas(df_final_db_all_features)
     csv.write_csv(table, os.path.join(FOLDER_PATH, "ДБсПризнаками_Ozon.csv"))
 
