@@ -1,9 +1,10 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os
-import sys
-import subprocess
 from datetime import datetime
+
+# Direct import of assembly script
+import DashboardAssemblyOZ
 
 
 class DashboardAssemblyOZGUI:
@@ -104,7 +105,7 @@ class DashboardAssemblyOZGUI:
         run_button = tk.Button(
             button_frame,
             text="▶️ Запустить сборку базы данных",
-            command=self.run_script,
+            command=self.run_assembly,
             font=("Arial", 12, "bold"),
             bg="#4248f5",
             fg="white",
@@ -313,125 +314,32 @@ class DashboardAssemblyOZGUI:
         self.log_text.config(state=tk.DISABLED)
         self.root.update()
         
-    def run_script(self):
-        """Запускает скрипт DashboardAssemblyOZ.py"""
+    def run_assembly(self):
+        """Запускает скрипт сборки дашборда"""
         # Очистка лога
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete(1.0, tk.END)
         self.log_text.config(state=tk.DISABLED)
         
-        script_file = "DashboardAssemblyOZ.py"
-        script_path = os.path.join(os.path.dirname(__file__), script_file)
-        
-        if not os.path.exists(script_path):
-            messagebox.showerror("Ошибка", f"Файл {script_file} не найден!")
-            self.log_message(f"❌ ОШИБКА: Файл {script_file} не найден!")
-            return
-            
-        self.log_message(f"▶️ Запуск скрипта: {script_file}")
-        self.log_message(f"📂 path_voronka: {self.path_voronka_var.get()}")
-        self.log_message(f"📂 path_zatraty: {self.path_zatraty_var.get()}")
-        self.log_message(f"📂 FOLDER_PATH: {self.folder_path_var.get()}")
-        self.log_message(f"📂 FOLDER_PATH_FEATURES: {self.folder_path_features_var.get()}")
-        self.log_message(f"📂 FOLDER_PATH_FOR_DB: {self.folder_path_for_db_var.get()}")
-        self.log_message(f"📂 FOLDER_PATH_DUDL: {self.folder_path_dudl_var.get()}")
-        self.log_message("─" * 60)
-        self.log_message("⚠️ ВНИМАНИЕ: Скрипт запускается как отдельный процесс Python.")
-        self.log_message("Это может занять длительное время...")
+        self.log_message("▶️ Запуск скрипта: DashboardAssemblyOZ.py")
+        self.log_message("📦 Сборка дашборда OZON...")
         self.log_message("─" * 60)
         
         try:
-            # Создаем временный файл с путями
-            temp_config_file = os.path.join(os.path.dirname(__file__), "_temp_config.py")
+            # Вызываем main() функцию напрямую
+            self.log_message("🔄 Выполнение скрипта сборки дашборда OZON...")
+            DashboardAssemblyOZ.assemble()
+            self.log_message("✅ Скрипт выполнен успешно")
             
-            with open(temp_config_file, 'w', encoding='utf-8') as f:
-                f.write(f"# Временный конфигурационный файл для путей\n")
-                f.write(f"path_voronka = r\"{self.path_voronka_var.get()}\"\n")
-                f.write(f"path_zatraty = r\"{self.path_zatraty_var.get()}\"\n")
-                f.write(f"FOLDER_PATH = r\"{self.folder_path_var.get()}\"\n")
-                f.write(f"FOLDER_PATH_FEATURES = r\"{self.folder_path_features_var.get()}\"\n")
-                f.write(f"FOLDER_PATH_FOR_DB = r\"{self.folder_path_for_db_var.get()}\"\n")
-                f.write(f"FOLDER_PATH_DUDL = r\"{self.folder_path_dudl_var.get()}\"\n")
-            
-            self.log_message("📝 Конфигурационный файл создан")
-            
-            # Читаем оригинальный скрипт
-            with open(script_path, 'r', encoding='utf-8') as f:
-                original_script = f.read()
-            
-            # Заменяем пути в скрипте
-            modified_script = original_script
-            
-            # Заменяем path_voronka
-            modified_script = modified_script.replace(
-                'path_voronka = r"Z:\\Analytics\\Marketplaceanalytics\\Федоров\\Дашбоард по рекламным кампаниям\\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\\ВЫГРУЗКА воронка Озон"',
-                f'path_voronka = r"{self.path_voronka_var.get()}"'
-            )
-            
-            # Заменяем path_zatraty
-            modified_script = modified_script.replace(
-                'path_zatraty = r"Z:\\Analytics\\Marketplaceanalytics\\Федоров\\Дашбоард по рекламным кампаниям\\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\\Затраты\\Озон. Затраты из Аналитики"',
-                f'path_zatraty = r"{self.path_zatraty_var.get()}"'
-            )
-            
-            # Заменяем FOLDER_PATH
-            modified_script = modified_script.replace(
-                'FOLDER_PATH = os.path.normpath(r"\\\\kari.local\\public\\all\\Analytics\\Marketplaceanalytics\\Федоров\\Дашбоард по рекламным кампаниям\\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!")',
-                f'FOLDER_PATH = os.path.normpath(r"{self.folder_path_var.get()}")'
-            )
-            
-            # Заменяем FOLDER_PATH_FEATURES
-            modified_script = modified_script.replace(
-                'FOLDER_PATH_FEATURES = r"\\\\kari.local\\public\\all\\Analytics\\Marketplaceanalytics\\Дашбоард по рекламным кампаниям"',
-                f'FOLDER_PATH_FEATURES = r"{self.folder_path_features_var.get()}"'
-            )
-            
-            # Заменяем FOLDER_PATH_FOR_DB
-            modified_script = modified_script.replace(
-                'FOLDER_PATH_FOR_DB= os.path.normpath(r"\\\\kari.local\\public\\all\\Analytics\\Marketplaceanalytics\\Федоров\\Дашбоард по рекламным кампаниям")',
-                f'FOLDER_PATH_FOR_DB= os.path.normpath(r"{self.folder_path_for_db_var.get()}")'
-            )
-            
-            # Заменяем FOLDER_PATH_DUDL
-            modified_script = modified_script.replace(
-                'FOLDER_PATH_DUDL = os.path.normpath(r"\\\\kari.local\\public\\all\\Агрегаторы\\Дашборд реклама WB_OZ")',
-                f'FOLDER_PATH_DUDL = os.path.normpath(r"{self.folder_path_dudl_var.get()}")'
-            )
-            
-            # Сохраняем временный скрипт
-            temp_script_path = os.path.join(os.path.dirname(__file__), "_temp_DashboardAssemblyOZ.py")
-            with open(temp_script_path, 'w', encoding='utf-8') as f:
-                f.write(modified_script)
-            
-            self.log_message("📝 Временный скрипт с измененными путями создан")
-            self.log_message("🚀 Запуск скрипта... (окно консоли откроется отдельно)")
-            
-            # Запускаем скрипт в отдельном окне консоли
-            if sys.platform == "win32":
-                # Для Windows используем cmd с ключом /K чтобы окно не закрывалось
-                process = subprocess.Popen(
-                    ['cmd', '/c', 'start', 'cmd', '/K', 'python', temp_script_path],
-                    shell=True
-                )
-            else:
-                process = subprocess.Popen(['python', temp_script_path])
-            
-            self.log_message("✅ Скрипт запущен в отдельном окне консоли")
-            self.log_message("📌 Следите за прогрессом в окне консоли")
             self.log_message("─" * 60)
-            self.log_message("ℹ️ После завершения работы скрипта можно закрыть это окно")
+            self.log_message("🎉 СБОРКА ДАШБОРДА ЗАВЕРШЕНА!")
             
             # Записываем в лог-файл
             logs = open('logs.log', 'a')
-            logs.write(f'{datetime.now()} - DashboardAssemblyOZ.py started via GUI\n')
+            logs.write(f'{datetime.now()} - DashboardAssemblyOZ.py completed via GUI\n')
             logs.close()
             
-            messagebox.showinfo(
-                "Скрипт запущен", 
-                "Скрипт запущен в отдельном окне консоли.\n\n"
-                "Следите за прогрессом в открывшемся окне.\n"
-                "Это окно можно закрыть."
-            )
+            messagebox.showinfo("Успех", "Скрипт успешно выполнен!")
             
         except Exception as e:
             error_message = f"❌ ОШИБКА: {str(e)}"
@@ -442,6 +350,10 @@ class DashboardAssemblyOZGUI:
             logs = open('logs.log', 'a')
             logs.write(f'{datetime.now()} - ERROR in DashboardAssemblyOZ.py: {str(e)}\n')
             logs.close()
+            
+        # finally:
+        #     # Возвращаем stdout обратно
+        #     sys.stdout = old_stdout
 
 
 def main():

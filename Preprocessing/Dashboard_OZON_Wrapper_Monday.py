@@ -249,30 +249,34 @@ def update_power_query_filter():
         print(f"✅ Данные в '{dated_path}' обновлены")
     finally:
         excel.Quit()
+def main():
+    # Подготавливаем 3 дня сразу, пятница, суббота и воскресенье
+    copyFrom = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
+    pattern = r"Аналитика продвижения_(\d{2}\.\d{2}\.\d{4})\.xlsx"
+    # file_sku_1, file_sku_2, file_sku_3 = get_latest_file_by_pattern(copyFrom, pattern)
+    # file_sku_1 = copy_and_convert_sku_statistics(filename=file_sku_1, downloads_path=copyFrom)
+    # file_sku_2 = copy_and_convert_sku_statistics(filename=file_sku_2, downloads_path=copyFrom)
+    # file_sku_3 = copy_and_convert_sku_statistics(filename=file_sku_3, downloads_path=copyFrom)
 
-# Подготавливаем 3 дня сразу, пятница, суббота и воскресенье
-copyFrom = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
-pattern = r"Аналитика продвижения_(\d{2}\.\d{2}\.\d{4})\.xlsx"
-# file_sku_1, file_sku_2, file_sku_3 = get_latest_file_by_pattern(copyFrom, pattern)
-# file_sku_1 = copy_and_convert_sku_statistics(filename=file_sku_1, downloads_path=copyFrom)
-# file_sku_2 = copy_and_convert_sku_statistics(filename=file_sku_2, downloads_path=copyFrom)
-# file_sku_3 = copy_and_convert_sku_statistics(filename=file_sku_3, downloads_path=copyFrom)
+    file_sku_1, file_sku_2, file_sku_3 = process_last_3_sku_files(copyFrom)
 
-file_sku_1, file_sku_2, file_sku_3 = process_last_3_sku_files(copyFrom)
+    pattern = r"analytics_report_\d{4}-\d{2}-\d{2}_\d{2}_\d{2}\.xlsx"
+    file_report_1, file_report_2, file_report_3 = get_latest_file_by_pattern(copyFrom, pattern)
 
-pattern = r"analytics_report_\d{4}-\d{2}-\d{2}_\d{2}_\d{2}\.xlsx"
-file_report_1, file_report_2, file_report_3 = get_latest_file_by_pattern(copyFrom, pattern)
+    # Начинаем с 3 файла (с пятницы). Т.е. в порядке пятница-суббота-понедельник
+    file_report_3 = copy_to_directory(copyFrom, folder_воронка, file_report_3)
+    # update_power_query_filter() # Обновляем данные в новом файле
+    file_report_2 = copy_to_directory(copyFrom, folder_воронка, file_report_2)
+    # update_power_query_filter() # Обновляем данные в новом файле
+    file_report_1 = copy_to_directory(copyFrom, folder_воронка, file_report_1)
+    # update_power_query_filter() # Обновляем данные в новом файле
 
-# Начинаем с 3 файла (с пятницы). Т.е. в порядке пятница-суббота-понедельник
-file_report_3 = copy_to_directory(copyFrom, folder_воронка, file_report_3)
-# update_power_query_filter() # Обновляем данные в новом файле
-file_report_2 = copy_to_directory(copyFrom, folder_воронка, file_report_2)
-# update_power_query_filter() # Обновляем данные в новом файле
-file_report_1 = copy_to_directory(copyFrom, folder_воронка, file_report_1)
-# update_power_query_filter() # Обновляем данные в новом файле
+    # Запускаем скрипт
+    # subprocess.run(['DB_OZ_1.1.exe'], check=True)a
 
-# Запускаем скрипт
-# subprocess.run(['DB_OZ_1.1.exe'], check=True)a
+    logs = open('logs.log', 'a')
+    logs.write(f'{datetime.now()} - OZON Dashboard Wrapper completed\n')
 
-logs = open('logs.log', 'a')
-logs.write(f'{datetime.now()} - OZON Dashboard Wrapper completed\n')
+# ▶️ Запуск всех этапов
+if __name__ == "__main__":
+    main()

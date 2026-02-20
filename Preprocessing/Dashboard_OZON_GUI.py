@@ -2,8 +2,12 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os
 import sys
-import importlib.util
 from datetime import datetime
+
+# Direct imports of wrapper scripts
+import Dashboard_OZON_Wrapper
+import Dashboard_OZON_Wrapper_Monday
+
 
 
 class DashboardOZONGUI:
@@ -314,18 +318,12 @@ class DashboardOZONGUI:
         # Получаем выбранный wrapper
         wrapper_choice = self.wrapper_choice.get()
         
-        wrapper_files = {
-            "wrapper": "Dashboard_OZON_Wrapper.py",
-            "wrapper_monday": "Dashboard_OZON_Wrapper_Monday.py"
+        wrapper_modules = {
+            "wrapper": ("Dashboard_OZON_Wrapper.py", Dashboard_OZON_Wrapper),
+            "wrapper_monday": ("Dashboard_OZON_Wrapper_Monday.py", Dashboard_OZON_Wrapper_Monday)
         }
         
-        wrapper_file = wrapper_files[wrapper_choice]
-        wrapper_path = os.path.join(os.path.dirname(__file__), wrapper_file)
-        
-        if not os.path.exists(wrapper_path):
-            messagebox.showerror("Ошибка", f"Файл {wrapper_file} не найден!")
-            self.log_message(f"❌ ОШИБКА: Файл {wrapper_file} не найден!")
-            return
+        wrapper_file, wrapper_module = wrapper_modules[wrapper_choice]
             
         self.log_message(f"▶️ Запуск скрипта: {wrapper_file}")
         self.log_message(f"📂 Downloads Folder: {self.downloads_folder_var.get()}")
@@ -335,65 +333,20 @@ class DashboardOZONGUI:
         self.log_message("─" * 60)
         
         try:
-            # Динамическая загрузка модуля
-            spec = importlib.util.spec_from_file_location("wrapper_module", wrapper_path)
-            wrapper_module = importlib.util.module_from_spec(spec)
-            
             # Устанавливаем переменные окружения для модуля
+            wrapper_module.downloads_folder = self.downloads_folder_var.get()
             wrapper_module.folder_воронка = self.folder_воронка_var.get()
             wrapper_module.folder_затраты_Озон = self.folder_затраты_Озон_var.get()
             wrapper_module.folder_затраты_Озон_NewFormat = self.folder_затраты_Озон_NewFormat_var.get()
             wrapper_module.folder_показатели_по_дням = os.path.join(
-                os.path.dirname(self.folder_воронка_var.get()), 
+                os.path.dirname(self.folder_воронка_var.get()),
                 "Показатели по дням"
             )
             
-            # Загружаем модуль
-            spec.loader.exec_module(wrapper_module)
-            
-            # Запуск функций в зависимости от выбранного wrapper
-            if wrapper_choice == "wrapper":
-                copyFrom = self.downloads_folder_var.get()
-                
-                self.log_message("🔄 Этап 1: Поиск последнего файла SKU статистики...")
-                pattern = r"Аналитика продвижения_(\d{2}\.\d{2}\.\d{4})\.xlsx"
-                file_sku = wrapper_module.get_latest_file_by_pattern(copyFrom, pattern)
-                self.log_message(f"✅ Найден файл: {file_sku}")
-                
-                self.log_message("🔄 Этап 2: Конвертация SKU статистики...")
-                file_sku = wrapper_module.copy_and_convert_sku_statistics(
-                    filename=file_sku, 
-                    downloads_path=copyFrom
-                )
-                self.log_message("✅ Этап 2 выполнен")
-                
-                self.log_message("🔄 Этап 3: Копирование файла отчета воронки...")
-                pattern = r"analytics_report_\d{4}-\d{2}-\d{2}_\d{2}_\d{2}\.xlsx"
-                file_report = wrapper_module.get_latest_file_by_pattern(copyFrom, pattern)
-                wrapper_module.copy_to_directory(copyFrom, wrapper_module.folder_воронка, file_report)
-                self.log_message("✅ Этап 3 выполнен")
-                
-            elif wrapper_choice == "wrapper_monday":
-                copyFrom = self.downloads_folder_var.get()
-                
-                self.log_message("🔄 Этап 1: Обработка последних 3 файлов SKU...")
-                file_sku_1, file_sku_2, file_sku_3 = wrapper_module.process_last_3_sku_files(copyFrom)
-                self.log_message("✅ Этап 1 выполнен (3 файла обработаны)")
-                
-                self.log_message("🔄 Этап 2: Копирование последних 3 файлов отчетов...")
-                pattern = r"analytics_report_\d{4}-\d{2}-\d{2}_\d{2}_\d{2}\.xlsx"
-                file_report_1, file_report_2, file_report_3 = wrapper_module.get_latest_file_by_pattern(copyFrom, pattern)
-                
-                wrapper_module.copy_to_directory(copyFrom, wrapper_module.folder_воронка, file_report_3)
-                self.log_message(f"✅ Скопирован файл пятницы: {file_report_3}")
-                
-                wrapper_module.copy_to_directory(copyFrom, wrapper_module.folder_воронка, file_report_2)
-                self.log_message(f"✅ Скопирован файл субботы: {file_report_2}")
-                
-                wrapper_module.copy_to_directory(copyFrom, wrapper_module.folder_воронка, file_report_1)
-                self.log_message(f"✅ Скопирован файл воскресенья: {file_report_1}")
-                
-                self.log_message("✅ Этап 2 выполнен")
+            # Вызываем main() функцию напрямую
+            self.log_message("🔄 Выполнение скрипта обработки данных OZON...")
+            wrapper_module.main()
+            self.log_message("✅ Скрипт выполнен успешно")
             
             self.log_message("─" * 60)
             self.log_message("🎉 ВСЕ ЭТАПЫ УСПЕШНО ВЫПОЛНЕНЫ!")

@@ -2,8 +2,13 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os
 import sys
-import importlib.util
 from datetime import datetime
+
+# Direct imports of wrapper scripts
+import Dashboard_WB_Wrapper
+import Dashboard_WB_Wrapper_Tuesday
+import Dashboard_WB_Wrapper_Monday
+
 
 
 class DashboardGUI:
@@ -326,19 +331,13 @@ class DashboardGUI:
         # Получаем выбранный wrapper
         wrapper_choice = self.wrapper_choice.get()
         
-        wrapper_files = {
-            "wrapper": "Dashboard_WB_Wrapper.py",
-            "wrapper_tuesday": "Dashboard_WB_Wrapper_Tuesday.py",
-            "wrapper_monday": "Dashboard_WB_Wrapper_Monday.py"
+        wrapper_modules = {
+            "wrapper": ("Dashboard_WB_Wrapper.py", Dashboard_WB_Wrapper),
+            "wrapper_tuesday": ("Dashboard_WB_Wrapper_Tuesday.py", Dashboard_WB_Wrapper_Tuesday),
+            "wrapper_monday": ("Dashboard_WB_Wrapper_Monday.py", Dashboard_WB_Wrapper_Monday)
         }
         
-        wrapper_file = wrapper_files[wrapper_choice]
-        wrapper_path = os.path.join(os.path.dirname(__file__), wrapper_file)
-        
-        if not os.path.exists(wrapper_path):
-            messagebox.showerror("Ошибка", f"Файл {wrapper_file} не найден!")
-            self.log_message(f"❌ ОШИБКА: Файл {wrapper_file} не найден!")
-            return
+        wrapper_file, wrapper_module = wrapper_modules[wrapper_choice]
             
         self.log_message(f"▶️ Запуск скрипта: {wrapper_file}")
         self.log_message(f"📂 Downloads Folder: {self.downloads_folder_var.get()}")
@@ -348,10 +347,6 @@ class DashboardGUI:
         self.log_message("─" * 60)
         
         try:
-            # Динамическая загрузка модуля
-            spec = importlib.util.spec_from_file_location("wrapper_module", wrapper_path)
-            wrapper_module = importlib.util.module_from_spec(spec)
-            
             # Устанавливаем переменные окружения для модуля
             wrapper_module.downloads_folder = self.downloads_folder_var.get()
             wrapper_module.folder_wb = self.folder_wb_var.get()
@@ -359,86 +354,10 @@ class DashboardGUI:
             wrapper_module.folder_week = self.folder_week_var.get()
             wrapper_module.folder_campaign_info = os.path.dirname(self.folder_wb_var.get())
             
-            # Загружаем модуль
-            spec.loader.exec_module(wrapper_module)
-            
-            # Запуск функций в зависимости от выбранного wrapper
-            if wrapper_choice == "wrapper":
-                self.log_message("🔄 Этап 1: Извлечение последнего файла воронки...")
-                voronka_wb = wrapper_module.extract_latest_vb_file()
-                self.log_message("✅ Этап 1 выполнен")
-                
-                self.log_message("🔄 Унификация столбцов...")
-                wrapper_module.unify_columns(voronka_wb)
-                self.log_message("✅ Унификация столбцов выполнена")
-                
-                self.log_message("🔄 Этап 2: Копирование файла История-затрат...")
-                wrapper_module.copy_latest_cost_history()
-                self.log_message("✅ Этап 2 выполнен")
-                
-                self.log_message("🔄 Этап 3: Обновление файла недели...")
-                wrapper_module.update_latest_week_file()
-                self.log_message("✅ Этап 3 выполнен")
-                
-                self.log_message("🔄 Этап 4: Обновление Затраты ВБ_2...")
-                wrapper_module.update_zatraty_wb2()
-                self.log_message("✅ Этап 4 выполнен")
-                
-            elif wrapper_choice == "wrapper_tuesday":
-                self.log_message("🔄 Этап 1: Извлечение последнего файла воронки...")
-                voronka_wb = wrapper_module.extract_latest_vb_file()
-                self.log_message("✅ Этап 1 выполнен")
-                
-                self.log_message("🔄 Унификация столбцов...")
-                wrapper_module.unify_columns(voronka_wb)
-                self.log_message("✅ Унификация столбцов выполнена")
-                
-                self.log_message("🔄 Этап 2: Копирование файла История-затрат...")
-                wrapper_module.copy_latest_cost_history()
-                self.log_message("✅ Этап 2 выполнен")
-                
-                self.log_message("🔄 Этап 3: Дублирование файла недели...")
-                new_file_path = wrapper_module.duplicate_latest_week_file()
-                self.log_message("✅ Этап 3 выполнен")
-                
-                self.log_message("🔄 Этап 3.1: Извлечение дат из запроса...")
-                old_dates = wrapper_module.extract_dates_from_query(new_file_path, wrapper_module.query_name)
-                self.log_message("✅ Этап 3.1 выполнен")
-                
-                self.log_message("🔄 Этап 3.2-3.3: Обновление Power Query...")
-                wrapper_module.update_power_query_steps(new_file_path, wrapper_module.query_name, old_dates)
-                self.log_message("✅ Этап 3.2-3.3 выполнен")
-                
-                self.log_message("🔄 Этап 4: Обновление файла недели...")
-                wrapper_module.update_latest_week_file()
-                self.log_message("✅ Этап 4 выполнен")
-                
-                self.log_message("🔄 Этап 5: Обновление Затраты ВБ_2...")
-                wrapper_module.update_zatraty_wb2()
-                self.log_message("✅ Этап 5 выполнен")
-                
-            elif wrapper_choice == "wrapper_monday":
-                self.log_message("🔄 Этап 1: Извлечение последних 3 файлов воронки...")
-                voronka_wb_1, voronka_wb_2, voronka_wb_3 = wrapper_module.extract_latest_3_wb_files()
-                self.log_message("✅ Этап 1 выполнен")
-                
-                self.log_message("🔄 Унификация столбцов для файлов...")
-                wrapper_module.unify_columns(voronka_wb_1)
-                wrapper_module.unify_columns(voronka_wb_2)
-                wrapper_module.unify_columns(voronka_wb_3)
-                self.log_message("✅ Унификация столбцов выполнена")
-                
-                self.log_message("🔄 Этап 2: Копирование файла История-затрат...")
-                wrapper_module.copy_latest_cost_history()
-                self.log_message("✅ Этап 2 выполнен")
-                
-                self.log_message("🔄 Этап 3: Обновление файла недели...")
-                wrapper_module.update_latest_week_file()
-                self.log_message("✅ Этап 3 выполнен")
-                
-                self.log_message("🔄 Этап 4: Обновление Затраты ВБ_2...")
-                wrapper_module.update_zatraty_wb2()
-                self.log_message("✅ Этап 4 выполнен")
+            # Вызываем main() функцию напрямую
+            self.log_message("🔄 Выполнение скрипта...")
+            wrapper_module.main()
+            self.log_message("✅ Скрипт выполнен успешно")
             
             self.log_message("─" * 60)
             self.log_message("🎉 ВСЕ ЭТАПЫ УСПЕШНО ВЫПОЛНЕНЫ!")
@@ -449,6 +368,7 @@ class DashboardGUI:
             logs.close()
             
             messagebox.showinfo("Успех", "Скрипт успешно выполнен!")
+            
             
         except Exception as e:
             error_message = f"❌ ОШИБКА: {str(e)}"

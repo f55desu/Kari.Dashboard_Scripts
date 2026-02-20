@@ -12,9 +12,6 @@ import pandas as pd
 
 import subprocess
 
-logs = open('logs.log', 'a')
-logs.write(f'{datetime.now()} - OZON Dashboard Wrapper ran\n')
-
 # 🔧 Параметры (КОНСТАНТЫ ПУТЕЙ)
 query_name = "Воронка"
 # folder_воронка = "ВЫГРУЗКА воронка Озон"
@@ -23,8 +20,8 @@ query_name = "Воронка"
 
 folder_воронка = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\ВЫГРУЗКА воронка Озон"
 folder_показатели_по_дням = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Показатели по дням"
-folder_затраты_Озон = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\\Озон. Затраты из Аналитики"
-folder_затраты_Озон_NewFormat = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\\Озон. Затраты из Аналитики New Format"
+folder_затраты_Озон = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\Озон. Затраты из Аналитики"
+folder_затраты_Озон_NewFormat = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\Озон. Затраты из Аналитики New Format"
 
 import asyncio
 from telegram import Bot
@@ -259,20 +256,31 @@ def update_power_query_filter():
         wb.Close()
         excel.Quit()
 
-copyFrom = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
-pattern = r"Аналитика продвижения_(\d{2}\.\d{2}\.\d{4})\.xlsx"
-file_sku = get_latest_file_by_pattern(copyFrom, pattern)
-file_sku = copy_and_convert_sku_statistics(filename=file_sku, downloads_path=copyFrom)
 
-pattern = r"analytics_report_\d{4}-\d{2}-\d{2}_\d{2}_\d{2}\.xlsx"
-file_report = get_latest_file_by_pattern(copyFrom, pattern)
-copy_to_directory(copyFrom, folder_воронка, file_report)
+def main():
+    """Main execution function for Dashboard OZON Wrapper"""
+    logs = open('logs.log', 'a')
+    logs.write(f'{datetime.now()} - OZON Dashboard Wrapper ran\n')
 
-# update_power_query_filter() # Обновляем данные в новом файле
+    copyFrom = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
+    pattern = r"Аналитика продвижения_(\d{2}\.\d{2}\.\d{4})\.xlsx"
+    file_sku = get_latest_file_by_pattern(copyFrom, pattern)
+    file_sku = copy_and_convert_sku_statistics(filename=file_sku, downloads_path=copyFrom)
 
-# Запускаем скрипт
-# subprocess.run(['DB_OZ_1.1.exe'], check=True)
+    pattern = r"analytics_report_\d{4}-\d{2}-\d{2}_\d{2}_\d{2}\.xlsx"
+    file_report = get_latest_file_by_pattern(copyFrom, pattern)
+    copy_to_directory(copyFrom, folder_воронка, file_report)
 
-# telegram_sendMessage(chat_id=421762273, text="ОЗОН исходники прод. готовы.")
-logs = open('logs.log', 'a')
-logs.write(f'{datetime.now()} - OZON Dashboard Wrapper completed\n')
+    # update_power_query_filter() # Обновляем данные в новом файле
+
+    # Запускаем скрипт
+    # subprocess.run(['DB_OZ_1.1.exe'], check=True)
+
+    # telegram_sendMessage(chat_id=421762273, text="ОЗОН исходники прод. готовы.")
+    logs = open('logs.log', 'a')
+    logs.write(f'{datetime.now()} - OZON Dashboard Wrapper completed\n')
+    logs.close()
+
+# ▶️ Запуск всех этапов
+if __name__ == "__main__":
+    main()

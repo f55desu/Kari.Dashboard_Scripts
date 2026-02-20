@@ -83,7 +83,7 @@ def extract_latest_3_wb_files():
     # Возвращаем пути к трем последним файлам
     return new_files[0], new_files[1], new_files[2]
 
-def unify_columns(filepath, ethalon='Воронка ВБ Эталон.xlsx', sheet_name='Товары', header_row=2):
+def unify_columns(filepath, ethalon=os.path.join(downloads_folder, 'Воронка ВБ Эталон.xlsx'), sheet_name='Товары', header_row=2):
     # Чтение эталонного файла
     ethalon_df = pd.read_excel(ethalon, sheet_name=sheet_name, header=1)
     
@@ -170,7 +170,7 @@ def delete_columns_by_header(filepath, sheet_name="Товары", target_headers
 # 💰 Этап 2: Копировать файл История-затрат
 def copy_latest_cost_history():
     # Новый паттерн для поиска файла "Не определено"
-    pattern = r"История-затрат-Не определено-2025-.*\.xlsx"
+    pattern = r"История-затрат-Не определено-.*\.xlsx"
     
     # Ищем файлы, соответствующие паттерну
     files = [f for f in os.listdir(downloads_folder) if re.match(pattern, f)]
@@ -299,8 +299,9 @@ def update_zatraty_wb2():
         wb.Close()
         excel.Quit()
 
-# ▶️ Запуск всех этапов
-if __name__ == "__main__":
+
+def main():
+    """Main execution function for Dashboard WB Wrapper (Monday version)"""
     logs = open('logs.log', 'a')
     logs.write(f'{datetime.now()} - WB Dashboard Wrapper ran\n')
 
@@ -317,3 +318,9 @@ if __name__ == "__main__":
 
     logs = open('logs.log', 'a')
     logs.write(f'{datetime.now()} - WB Dashboard Wrapper completed\n')
+    logs.close()
+
+# ▶️ Запуск всех этапов
+if __name__ == "__main__":
+    main()
+

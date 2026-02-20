@@ -5,6 +5,7 @@ ssh_key
 ssh_key.pub
 build
 dist
+__pycache__
 Preprocessing/__pycache__
 Preprocessing/build
 Preprocessing/dist
