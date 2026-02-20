@@ -7,8 +7,11 @@ import time  # Для измерения времени выполнения
 import shutil
 import re
 from glob import glob
+# from glob import glob
 import gc
-from datetime import timedelta, datetime
+from datetime import timedelta
+import datetime
+# from datetime import datetime
 
 # Функция для форматирования времени в часы, минуты и секунды
 def format_elapsed_time(seconds):
@@ -48,6 +51,8 @@ def handle_errors(df):
         if df[col].dtype == 'object':
             df[col] = df[col].apply(lambda x: None if isinstance(x, str) and x.strip() == '' else x)
     return df
+
+
 FOLDER_PATH = os.path.normpath(r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!")
 FOLDER_PATH_FEATURES = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Дашбоард по рекламным кампаниям"
 FOLDER_PATH_FOR_DB= os.path.normpath(r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям")
@@ -56,17 +61,22 @@ FOLDER_PATH_DUDL = os.path.normpath(r"\\kari.local\public\all\Агрегатор
 SQL_SERVER = "cl01sql"
 SQL_DATABASE_DBREPORT = "DBReport"
 SQL_DATABASE_DBPARTNERS = "DBPartners"
-# Папки
-path_voronka = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\ВЫГРУЗКА воронка Озон"
-path_zatraty = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\Озон. Затраты из Аналитики"
-
 
 def assemble():
-    """Главная функция сборки дашборда OZON"""    
     print("Начинаем собирать Базу Данных...")
     start_all_time = time.time()
     engine = connect_to_sql(SQL_SERVER, SQL_DATABASE_DBPARTNERS)
 
+    # 1. Воронка
+    # import pandas as pd
+    # import glob
+    # import os
+    # import datetime
+    # import pyodbc
+
+    # Папки
+    path_voronka = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\ВЫГРУЗКА воронка Озон"
+    path_zatraty = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\Озон. Затраты из Аналитики"
 
     # === 1. ВОРОНКА ===
     df_voronka_list = []
@@ -76,9 +86,9 @@ def assemble():
         # достаём дату из имени файла
         fname = os.path.basename(file)
         try:
-            report_date = str(datetime.strptime(fname.split("_")[2], "%Y-%m-%d").date() - timedelta(days=1))
+            report_date = str(datetime.datetime.strptime(fname.split("_")[2], "%Y-%m-%d").date() - timedelta(days=1))
         except Exception:
-            raise Exception("Невозможно определить дату из имени файла:", fname)
+            continue
 
         df = pd.read_excel(file, engine='calamine')
 
@@ -400,13 +410,15 @@ def assemble():
     df_prices = df_prices.groupby(["DT", "ITEMID"], as_index=False).agg({"PRICE": "max"})
     df_prices = df_prices.rename(columns={"DT": "Дата", "ITEMID": "Артикул", "PRICE": "Цена"})
 
-    print(f"df_prices min date: {str(df_voronka['Дата'].min())}\n")
-    print(f"df_prices: {df_prices}\n")
+
 
     # 11. Собираем полный датафрейм воронки
     df_reference = df_reference.drop_duplicates(subset=["Артикул"])
     df_reference = df_reference[["Артикул", "Бизнес-группа", "Направление", "Розничный отдел", "Группа", "Модель", "Бренд", "Коллекция", "Сезон", "Себестоимость с НДС", "Процент выкупа", "Две последние коллекции", 'Артикул OZ', 'Наименование', 'Техсегмент', 'Байер', 'Основной артикул', 'НДС', 'Ответственный за группу', 'Группа для отчетов']]
     df_reference
+
+    # import pandas as pd
+    # import numpy as np
 
     NBSP = '\u00A0'
 
@@ -793,23 +805,16 @@ def assemble():
 
     df_prices_exists = 'df_prices' in globals()
 
-    print(f"df_prices 2: {df_prices}\n")
-
     df_funnel_final = merge_voronka_costs_preserve_impressions(
         df_voronka=df_voronka_clean,
         df_costs=df_zatraty_clean,
-        df_prices=df_prices, #if df_prices_exists else None,
+        df_prices=df_prices,# if df_prices_exists else None,
         preserve_cols=('Показы, всего',),
         left_key_candidates=('Артикул OZ',),    # ← теперь одинаковое название!
         right_key='Артикул OZ',                 # ← и тут тоже!
         add_tail=False,
         type_col_candidates=('ТипАктивности',)
     )
-
-    print(f"Цена1: {df_funnel_final.head()}")
-    print(f"Цена1: {list(df_funnel_final.columns)}")
-    print(f"Цена1: {df_funnel_final['Цена']}")
-    
 
     print("\n✅ Мерж завершён!")
 
@@ -893,13 +898,14 @@ def assemble():
             'Заказы, шт': 'sum',     # суммируем заказы
         })
     )
-    # df_union_agg
+    df_union_agg
 
     df_all=df_all.drop_duplicates(subset=['Дата','Артикул OZ'])
 
 
 
     # 13. Связать "Воронка" с "Справочник" БЕЗ дублирования
+    # import numpy as np
     # --- утилита: выбрать колонку расхода (на всякий случай) ---
     SPEND_CANDIDATES = ['Расход, ₽', 'Расход, руб', 'Расход, Р', 'Расход']
     def _pick_spend_col(df: pd.DataFrame) -> str:
@@ -1074,6 +1080,9 @@ def assemble():
         'Рекламные показы на карточке товара', 'Цена'
         ]
 
+    # import numpy as np
+    # import pandas as pd
+
     def build_funnel_wide(
         df_raw: pd.DataFrame,
         funnel_columns: list,
@@ -1229,8 +1238,7 @@ def assemble():
         return out
 
     final_after_widing_columns = ['Дата', 'Артикул', 'Артикул OZ', 'ТипАктивности', 'Наименование', 'Коллекция', 'Бренд', 'Сезон', 'Направление', 'Розничный отдел', 'Модель', 'Группа', 'Бизнес-группа', 'Техсегмент', 'Байер', 'Две последние коллекции', 'Основной артикул', 'Себестоимость с НДС', 'Процент выкупа', 'НДС', 'Ответственный за группу', 'Группа для отчетов', 'SKU из объединенной карточки', 'Ассоциированные заказы, руб', 'Ассоциированные заказы, шт', 'Вывод в топ', 'Трафарет', 'Оплата за заказ', 'Органика', 'Вывод в топ_Показы, всего', 'Трафарет_Показы, всего', 'Оплата за заказ_Показы, всего', 'Органика_Показы, всего', 'Вывод в топ_Показы на карточке товара', 'Трафарет_Показы на карточке товара', 'Оплата за заказ_Показы на карточке товара', 'Органика_Показы на карточке товара', 'Вывод в топ_Показы в поиске и каталоге', 'Трафарет_Показы в поиске и каталоге', 'Оплата за заказ_Показы в поиске и каталоге', 'Органика_Показы в поиске и каталоге', 'Вывод в топ_Позиция в поиске и каталоге', 'Трафарет_Позиция в поиске и каталоге', 'Оплата за заказ_Позиция в поиске и каталоге', 'Органика_Позиция в поиске и каталоге', 'Вывод в топ_В корзину, всего', 'Трафарет_В корзину, всего', 'Оплата за заказ_В корзину, всего', 'Органика_В корзину, всего', 'Вывод в топ_Заказано товаров', 'Трафарет_Заказано товаров', 'Оплата за заказ_Заказано товаров', 'Органика_Заказано товаров', 'Вывод в топ_Отменено товаров', 'Трафарет_Отменено товаров', 'Оплата за заказ_Отменено товаров', 'Органика_Отменено товаров', 'Вывод в топ_Доставлено товаров', 'Трафарет_Доставлено товаров', 'Оплата за заказ_Доставлено товаров', 'Органика_Доставлено товаров', 'Вывод в топ_Возвращено товаров', 'Трафарет_Возвращено товаров', 'Оплата за заказ_Возвращено товаров', 'Органика_Возвращено товаров', 'Вывод в топ_Заказано на сумму', 'Трафарет_Заказано на сумму', 'Оплата за заказ_Заказано на сумму', 'Органика_Заказано на сумму', 'Вывод в топ_В корзину из карточки товара', 'Трафарет_В корзину из карточки товара', 'Оплата за заказ_В корзину из карточки товара', 'Органика_В корзину из карточки товара', 'Вывод в топ_Выкупили ШТ', 'Трафарет_Выкупили ШТ', 'Оплата за заказ_Выкупили ШТ', 'Органика_Выкупили ШТ', 'Вывод в топ_Расход, ₽', 'Трафарет_Расход, ₽', 'Оплата за заказ_Расход, ₽', 'Органика_Расход, ₽', 'Вывод в топ_Рекламные заказано на сумму', 'Трафарет_Рекламные заказано на сумму', 'Оплата за заказ_Рекламные заказано на сумму', 'Органика_Рекламные заказано на сумму', 'Вывод в топ_Рекламные заказано товаров', 'Трафарет_Рекламные заказано товаров', 'Оплата за заказ_Рекламные заказано товаров', 'Органика_Рекламные заказано товаров', 'Вывод в топ_Рекламные показы', 'Трафарет_Рекламные показы', 'Оплата за заказ_Рекламные показы', 'Органика_Рекламные показы', 'Вывод в топ_Рекламные показы на карточке товара', 'Трафарет_Рекламные показы на карточке товара', 'Оплата за заказ_Рекламные показы на карточке товара', 'Органика_Рекламные показы на карточке товара', 'Вывод в топ_Цена', 'Трафарет_Цена', 'Оплата за заказ_Цена', 'Органика_Цена', 'Показы, всего', 'Показы на карточке товара', 'Показы в поиске и каталоге', 'Позиция в поиске и каталоге', 'В корзину, всего', 'Заказано товаров', 'Отменено товаров', 'Доставлено товаров', 'Возвращено товаров', 'Заказано на сумму', 'В корзину из карточки товара', 'Выкупили ШТ', 'Расход, ₽', 'Рекламные заказано на сумму', 'Рекламные заказано товаров', 'Рекламные показы', 'Рекламные показы на карточке товара', 'Цена']
-    print('df_funnel_reference', df_funnel_reference.head())
-    print('df_funnel_reference', list(df_funnel_reference.columns))
+
     out = build_funnel_wide(df_raw=df_funnel_reference, funnel_columns=funnel_columns_widing)
     out = out[final_after_widing_columns]
     df_funnel_reference = out
@@ -1519,7 +1527,6 @@ def assemble():
             print("Файл 'Показы и затраты ОЗ_2.0.xlsx' не найден.")
     except Exception as e:
         print(f"Ошибка при обработке файла 'Показы и затраты ОЗ_2.0.xlsx': {e}")
-
 
 if __name__ == "__main__":
     assemble()
