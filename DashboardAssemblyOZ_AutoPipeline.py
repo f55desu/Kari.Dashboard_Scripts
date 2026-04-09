@@ -1,8 +1,9 @@
 import os
 import sys
+import ctypes
 
 if os.name == 'nt':  # Только для Windows
-    import ctypes
+    from ctypes import wintypes # Импортируем wintypes отдельно
     
     # Константы Windows API
     ENABLE_EXTENDED_FLAGS = 0x0080
