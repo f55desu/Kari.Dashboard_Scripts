@@ -93,7 +93,9 @@ def _date_minus_2_months(d: date) -> date:
     import calendar
     max_day = calendar.monthrange(year, month)[1]
     return d.replace(year=year, month=month, day=min(d.day, max_day))
-
+def _date_minus_days(d: date, days: int) -> date:
+    """Вычитает указанное количество дней из даты."""
+    return d - timedelta(days=days)
 
 # ─── main downloader ──────────────────────────────────────────────────────────
 
@@ -115,7 +117,8 @@ def download_wb_campaign_report(target_date: date = None, output_dir: Path = Non
             return False
 
     date_to   = target_date
-    date_from = _date_minus_2_months(target_date)
+    # date_from = _date_minus_2_months(target_date)
+    date_from = _date_minus_days(target_date, 35)
     url = f"{BASE_URL}?from={date_from.strftime('%Y-%m-%d')}&to={date_to.strftime('%Y-%m-%d')}"
 
     print(f"[{time.strftime('%H:%M:%S')}] Date range: {date_from} → {date_to}")

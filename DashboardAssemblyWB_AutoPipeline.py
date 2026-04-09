@@ -1,5 +1,19 @@
 import os
 import sys
+
+
+# 1. Берем путь к папке, где лежит этот файл
+base_path = os.path.dirname(os.path.abspath(__file__))
+# 2. Принудительно переходим в эту папку
+os.chdir(base_path)
+# 3. Добавляем путь в системные пути поиска модулей
+if base_path not in sys.path:
+    sys.path.insert(0, base_path)
+# 4. Для надежности: если папка Preprocessing внутри, добавим и её
+prep_path = os.path.join(base_path, 'Preprocessing')
+if os.path.exists(prep_path) and prep_path not in sys.path:
+    sys.path.insert(0, prep_path)
+
 from datetime import date, datetime, timedelta
 
 # Direct imports of wrapper scripts
@@ -27,8 +41,10 @@ def main():
         download_wb_report_v2()
         download_wb_campaign_report()
         print("WB Report and Campaign Report downloaded successfully")
+        logging.info("WB Report and Campaign Report downloaded successfully")
     except Exception as e:
         print(f"Error in download_wb_report_v2 or download_wb_campaign_report: {e}")
+        logging.info(f"Error in download_wb_report_v2 or download_wb_campaign_report: {e}")
         return False
 
     wrapper_modules = {  # pyright: ignore[reportUnreachable]
@@ -78,9 +94,7 @@ def main():
         logging.info("🎉 СБОРКА ДАШБОРДА ЗАВЕРШЕНА!")
         
         # Записываем в лог-файл
-        logs = open('logs.log', 'a')
-        logs.write(f'{datetime.now()} - DashboardAssemblyWB.py completed via GUI\n')
-        logs.close()
+        logging.info(f'{datetime.now()} - DashboardAssemblyWB.py completed via Pipeline')
         
         logging.info("Успех", "Скрипт успешно выполнен!")
         
