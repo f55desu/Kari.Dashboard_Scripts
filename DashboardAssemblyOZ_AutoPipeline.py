@@ -1,6 +1,24 @@
 import os
 import sys
 
+if os.name == 'nt':  # Только для Windows
+    import ctypes
+    
+    # Константы Windows API
+    ENABLE_EXTENDED_FLAGS = 0x0080
+    ENABLE_QUICK_EDIT_MODE = 0x0040
+    STD_INPUT_HANDLE = -10
+
+    h_input = ctypes.windll.kernel32.GetStdHandle(STD_INPUT_HANDLE)
+    mode = ctypes.wintypes.DWORD()
+    
+    if ctypes.windll.kernel32.GetConsoleMode(h_input, ctypes.byref(mode)):
+        # Отключаем QuickEdit Mode
+        new_mode = mode.value & ~ENABLE_QUICK_EDIT_MODE
+        # Важно также включить расширенные флаги
+        new_mode |= ENABLE_EXTENDED_FLAGS
+        ctypes.windll.kernel32.SetConsoleMode(h_input, new_mode)
+
 # 1. Берем путь к папке, где лежит этот файл
 base_path = os.path.dirname(os.path.abspath(__file__))
 # 2. Принудительно переходим в эту папку
