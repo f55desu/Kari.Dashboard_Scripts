@@ -1,0 +1,104 @@
+import os
+import sys
+
+# 1. Берем путь к папке, где лежит этот файл
+base_path = os.path.dirname(os.path.abspath(__file__))
+# 2. Принудительно переходим в эту папку
+os.chdir(base_path)
+# 3. Добавляем путь в системные пути поиска модулей
+if base_path not in sys.path:
+    sys.path.insert(0, base_path)
+# 4. Для надежности: если папка Preprocessing внутри, добавим и её
+prep_path = os.path.join(base_path, 'Preprocessing')
+if os.path.exists(prep_path) and prep_path not in sys.path:
+    sys.path.insert(0, prep_path)
+
+from datetime import date, datetime, timedelta
+
+# Direct imports of wrapper scripts
+import Preprocessing.Dashboard_OZON_Wrapper as Ozon_Wrapper
+from Preprocessing.ozon_ad_report_downloader import download_ozon_ad_report
+from Preprocessing.ozon_analytics_downloader import download_ozon_analytics_report
+
+import DashboardAssemblyOZ
+
+import logging
+
+# Настройка логирования: файл, формат, уровень
+logging.basicConfig(
+    filename='assembly_ozon.log',
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    encoding='utf-8' # Для корректного отображения кириллицы
+)
+
+output_dir=r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
+
+def main():
+    try:
+        download_ozon_analytics_report()
+        download_ozon_ad_report()
+        print("OZON Analytics and Ad Report downloaded successfully")
+        logging.info("OZON Analytics and Ad Report downloaded successfully")
+    except Exception as e:
+        print(f"Error in download_ozon_analytics_report or download_ozon_ad_report: {e}")
+        logging.info(f"Error in download_ozon_analytics_report or download_ozon_ad_report: {e}")
+        return False
+
+    wrapper_modules = {  # pyright: ignore[reportUnreachable]
+            "wrapper": ("Dashboard_OZON_Wrapper.py", Ozon_Wrapper),
+        }
+        
+    wrapper_file, wrapper_module = wrapper_modules["wrapper"]
+        
+    logging.info(f"▶️ Запуск скрипта: {wrapper_file}")
+    logging.info("─" * 60)
+    
+    try:
+        # Вызываем main() функцию напрямую
+        logging.info("🔄 Выполнение скрипта обработки данных OZON...")
+        wrapper_module.main()
+        logging.info("✅ Скрипт выполнен успешно")
+        
+        logging.info("─" * 60)
+        logging.info("🎉 ВСЕ ЭТАПЫ УСПЕШНО ВЫПОЛНЕНЫ!")
+        
+        # Записываем в лог-файл
+        logging.info(f'{datetime.now()} - {wrapper_file} completed via GUI\n')
+        
+    except Exception as e:
+        error_message = f"❌ ОШИБКА: {str(e)}"
+        logging.info(error_message)
+        # Записываем ошибку в лог-файл
+        logging.info(f'{datetime.now()} - ERROR in {wrapper_file}: {str(e)}\n')
+        return False
+
+
+    logging.info("▶️ Запуск скрипта: DashboardAssemblyOZ.py")
+    logging.info("📦 Сборка дашборда OZON...")
+    logging.info("─" * 60)
+    
+    try:
+        # Вызываем main() функцию напрямую
+        logging.info("🔄 Выполнение скрипта сборки дашборда OZON...")
+        DashboardAssemblyOZ.assemble()
+        logging.info("✅ Скрипт выполнен успешно")
+        
+        logging.info("─" * 60)
+        logging.info("🎉 СБОРКА ДАШБОРДА ЗАВЕРШЕНА!")
+        
+        logging.info('DashboardAssemblyOZ.py completed via Pipeline')
+        
+        logging.info("Успех", "Скрипт успешно выполнен!")
+        
+    except Exception as e:
+        error_message = f"❌ ОШИБКА: {str(e)}"
+        logging.info(error_message)
+        logging.info("Ошибка выполнения", str(e))
+        
+        # Записываем ошибку в лог-файл
+        logging.info(f'{datetime.now()} - ERROR in DashboardAssemblyOZ.py: {str(e)}\n')
+        return False
+
+if __name__ == "__main__":
+    main()
