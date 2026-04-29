@@ -8,8 +8,10 @@ from datetime import date, timedelta
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-sys.stdout.reconfigure(encoding="utf-8")
-sys.stderr.reconfigure(encoding="utf-8")
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding="utf-8")
+if sys.stderr is not None:
+    sys.stderr.reconfigure(encoding="utf-8")
 
 # Setup paths
 PROJECT_DIR = Path(__file__).parent
@@ -17,7 +19,7 @@ downloads_folder = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Tald
 DEFAULT_DOWNLOADS_DIR = Path(downloads_folder)
 # DEFAULT_DOWNLOADS_DIR(exist_ok=True)
 
-LOG_FILE = PROJECT_DIR / "config" / "wb_downloader.log"
+LOG_FILE = os.path.join(PROJECT_DIR, "wb_downloader.log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",

@@ -24,17 +24,19 @@ from datetime import date, timedelta, datetime
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-# sys.stdout.reconfigure(encoding="utf-8")
-# sys.stderr.reconfigure(encoding="utf-8")
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding="utf-8")
+if sys.stderr is not None:
+    sys.stderr.reconfigure(encoding="utf-8")
 
 PROJECT_DIR = Path(__file__).parent
 downloads_folder = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
 DEFAULT_DOWNLOADS_DIR = Path(downloads_folder)
 
-# LOG_FILE = PROJECT_DIR / "config" / "ozon_analytics.log"
+LOG_FILE = os.path.join(PROJECT_DIR, "assembly_ozon.log")
 
 logging.basicConfig(
-    filename='assembly_ozon.log',
+    filename=LOG_FILE,
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     encoding='utf-8' # Для корректного отображения кириллицы

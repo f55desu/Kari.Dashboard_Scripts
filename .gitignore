@@ -26,6 +26,5 @@ Dashboard_OZ_Assembly_AutoPipeline.exe
 Dashboard_OZ_Assembly_AutoPipeline.spec
 Dashboard_WB_Assembly_AutoPipeline.exe
 Dashboard_WB_Assembly_AutoPipeline.spec
-logs.log
-assembly_ozon.log
-assembly_wb.log
+*.log
+*.spec

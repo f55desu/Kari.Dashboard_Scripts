@@ -23,8 +23,10 @@ from datetime import date, timedelta
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-sys.stdout.reconfigure(encoding="utf-8")
-sys.stderr.reconfigure(encoding="utf-8")
+if sys.stdout is not None:
+    sys.stdout.reconfigure(encoding="utf-8")
+if sys.stderr is not None:
+    sys.stderr.reconfigure(encoding="utf-8")
 
 PROJECT_DIR = Path(__file__).parent
 

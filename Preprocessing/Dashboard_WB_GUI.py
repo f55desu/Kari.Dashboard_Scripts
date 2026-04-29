@@ -16,7 +16,7 @@ class DashboardGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Dashboard WB Wrapper - Графический интерфейс")
-        self.root.geometry("800x700")
+        self.root.geometry("800x850")
         self.root.resizable(False, False)
         
         # Переменные для хранения путей

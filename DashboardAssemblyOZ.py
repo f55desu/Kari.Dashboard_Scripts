@@ -396,10 +396,35 @@ def assemble():
             "Расход, ₽, с НДС": "Расход, ₽"
         })
 
+        # Числовые колонки в CSV могут прийти как строки с запятой-разделителем ("0,00",
+        # "1 234,56 ₽", "8103,00") или как int64 (когда все значения целые). После
+        # pd.concat смешанные типы схлопываются в object, и groupby(...).sum() склеивает
+        # строки вместо числового суммирования.
+        # Начиная с выгрузок 24.04.2026 Ozon стал возвращать с запятой ВСЕ числовые
+        # колонки (не только деньги), включая Показы / Клики / Заказы, шт. Поэтому
+        # чистим весь набор метрик, которые потом уйдут в merge_voronka_costs_preserve_impressions
+        # и build_funnel_wide.
+        _numeric_cols = (
+            "Расход, ₽", "Продажи, ₽", "Показы", "Клики", "Заказы, шт",
+            "В корзину", "ДРР, %", "CTR, %", "Конверсия в корзину, %",
+            "Затраты на заказ, ₽", "Стоимость клика, ₽",
+        )
+        for _num_col in _numeric_cols:
+            if _num_col in df.columns:
+                df[_num_col] = pd.to_numeric(
+                    df[_num_col].astype(str)
+                        .str.replace('\u00A0', '', regex=False)
+                        .str.replace(' ', '', regex=False)
+                        .str.replace('₽', '', regex=False)
+                        .str.replace('%', '', regex=False)
+                        .str.replace(',', '.', regex=False),
+                    errors='coerce'
+                )
+
         df_zatraty_list.append(df)
 
     df_zatraty = pd.concat(df_zatraty_list, ignore_index=True)
-
+    df_zatraty.loc[df_zatraty['ТипАктивности'] == 'Оплата за заказ: выбранные товары', 'ТипАктивности'] = 'Оплата за клик'
 
     # 10. Получить данные таблицы с SQL (Цены)
     # === 3. SQL ЦЕНЫ ===
@@ -701,7 +726,7 @@ def assemble():
         (df_zatraty_enriched['Инструмент'] == 'Оплата за клик') &
         (df_zatraty_enriched['Место размещения'] == 'Поиск и рекомендации')
     )
-    df_zatraty_enriched.loc[mask_trafarety, 'ТипАктивности'] = 'Трафареты'
+    df_zatraty_enriched.loc[mask_trafarety, 'ТипАктивности'] = 'Трафарет'
 
     # Вывод в топ
     mask_top = (

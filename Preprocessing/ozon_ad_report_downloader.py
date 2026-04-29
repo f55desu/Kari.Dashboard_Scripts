@@ -30,10 +30,10 @@ PROJECT_DIR          = Path(__file__).parent
 downloads_folder = r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
 DEFAULT_DOWNLOADS_DIR = Path(downloads_folder)
 
-# LOG_FILE = PROJECT_DIR / "config" / "ozon_ad_report.log"
+LOG_FILE = os.path.join(PROJECT_DIR, "assembly_ozon.log")
 
 logging.basicConfig(
-    filename='assembly_ozon.log',
+    filename=LOG_FILE,
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     encoding='utf-8' # Для корректного отображения кириллицы
