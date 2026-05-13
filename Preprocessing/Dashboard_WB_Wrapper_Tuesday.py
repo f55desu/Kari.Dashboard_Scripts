@@ -126,43 +126,45 @@ def copy_latest_cost_history():
     print(f"✅ Этап 2: файл {renamed_file} скопирован в Затраты ВБ и папка очищена")
     
 def unify_columns(filepath, ethalon=os.path.join(downloads_folder, 'Воронка ВБ Эталон.xlsx'), sheet_name='Товары', header_row=2):
-    # Чтение эталонного файла
+    """Приводит файл к структуре эталона: удаляет лишние столбцы И добавляет
+       отсутствующие из эталона как пустые (см. 07.05.2026 — ВБ убрал «Остатки склад ВБ, шт»
+       и «Остатки МП, шт», из-за чего Power Query терял данные за свежие дни)."""
     ethalon_df = pd.read_excel(ethalon, sheet_name=sheet_name, header=1)
-    
-    # Открытие файла воронки через openpyxl
-    wb = load_workbook(filename=filepath)
-    ws = wb[sheet_name]
-
-    # Получаем заголовки воронки
-    headers = [cell.value for cell in ws[header_row]]
-    
-    # Получаем заголовки эталонного файла
     ethalon_headers = ethalon_df.columns.tolist()
 
-    # Определяем столбцы для удаления (столбцы воронки, которых нет в эталоне)
-    columns_to_delete = [header for header in headers if header not in ethalon_headers]
+    wb = load_workbook(filename=filepath)
+    ws = wb[sheet_name]
+    headers = [cell.value for cell in ws[header_row]]
 
-    # Удаляем столбцы в файле воронки, которых нет в эталоне
+    # 1) Удаляем столбцы, которых нет в эталоне
+    columns_to_delete = [h for h in headers if h not in ethalon_headers]
     for col in reversed(columns_to_delete):
-        col_index = headers.index(col) + 1  # openpyxl использует 1-based индексацию
+        col_index = headers.index(col) + 1
         ws.delete_cols(col_index)
+    headers = [cell.value for cell in ws[header_row]]
 
-    # Замена "." на "," в числовых колонках
-    for row in ws.iter_rows(min_row=header_row + 1):  # начинаем со строки после заголовков
+    # 2) Добавляем отсутствующие столбцы из эталона (на нужные позиции)
+    for target_idx, eth_col in enumerate(ethalon_headers, start=1):
+        if eth_col not in headers:
+            ws.insert_cols(target_idx)
+            ws.cell(row=header_row, column=target_idx, value=eth_col)
+            headers.insert(target_idx - 1, eth_col)
+            print(f"  ➕ Добавлен отсутствующий столбец '{eth_col}' (позиция {target_idx})")
+
+    # 3) "." → "," в числовых строках
+    for row in ws.iter_rows(min_row=header_row + 1):
         for cell in row:
             val = cell.value
             if isinstance(val, str):
-                # Проверяем, что строка похожа на число с точкой
                 try:
-                    float(val.replace(',', '.'))  # если можно привести к float
-                    if '.' in val:  # только если есть точка
+                    float(val.replace(',', '.'))
+                    if '.' in val:
                         cell.value = val.replace('.', ',')
                 except ValueError:
-                    pass  # это не число — пропускаем
+                    pass
 
-    # Сохраняем изменения
     wb.save(filepath)
-    print(f"✅ Столбцы, не содержащиеся в эталонном файле, были удалены в файле: {filepath}")
+    print(f"✅ Столбцы унифицированы (удалено лишних: {len(columns_to_delete)}): {filepath}")
 
 # Этап 3: Копировать файл История-затрат
 def duplicate_latest_week_file():
@@ -326,7 +328,7 @@ def main():
 
     voronka_wb = extract_latest_vb_file() # 1
     unify_columns(voronka_wb)
-    copy_latest_cost_history() # 2
+    # copy_latest_cost_history() # 2
     # # 3
     new_file_path = duplicate_latest_week_file()
     old_dates = extract_dates_from_query(new_file_path, query_name)

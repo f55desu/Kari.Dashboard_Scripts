@@ -441,9 +441,9 @@ class DashboardGUI:
             if self.wrapper_choice.get() == "wrapper":
                 ok1 = download_wb_report_v2(output_dir=self.downloads_folder_var.get())
             elif self.wrapper_choice.get() == "wrapper_monday":
-                ok11 = download_wb_report_v2(target_date=date.today() - timedelta(days=1), output_dir=self.downloads_folder_var.get())
-                ok12 = download_wb_report_v2(target_date=date.today() - timedelta(days=2), output_dir=self.downloads_folder_var.get())
-                ok13 = download_wb_report_v2(target_date=date.today() - timedelta(days=3), output_dir=self.downloads_folder_var.get())
+                ok11 = download_wb_report_v2(target_date=date.today() - timedelta(days=1+2), output_dir=self.downloads_folder_var.get())
+                ok12 = download_wb_report_v2(target_date=date.today() - timedelta(days=2+2), output_dir=self.downloads_folder_var.get())
+                ok13 = download_wb_report_v2(target_date=date.today() - timedelta(days=3+2), output_dir=self.downloads_folder_var.get())
                 ok1 = ok11 and ok12 and ok13
             else:
                 raise ValueError("Неверный выбор wrapper")
