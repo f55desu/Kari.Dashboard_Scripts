@@ -328,7 +328,7 @@ def main():
 
     voronka_wb = extract_latest_vb_file() # 1
     unify_columns(voronka_wb)
-    # copy_latest_cost_history() # 2
+    copy_latest_cost_history() # 2
     # # 3
     new_file_path = duplicate_latest_week_file()
     old_dates = extract_dates_from_query(new_file_path, query_name)
