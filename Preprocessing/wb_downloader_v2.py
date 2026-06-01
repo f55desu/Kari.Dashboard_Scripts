@@ -544,18 +544,47 @@ def download_wb_report_v2(target_date: date = None, output_dir: Path = None):
                 return { ok: true, via, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
             };
 
-            // 0) Самый надёжный — контейнер action-кнопок таблицы воронки
-            //    "Sales-funnel-stages-table-header-view__right-buttons__*"
-            //    Внутри — три button'а: [0]=Excel, [1]=Download history, [2]=Settings
-            const rightBtnContainer = document.querySelector(
-                "[class*='Sales-funnel-stages-table-header-view__right-buttons']"
-            );
-            if (rightBtnContainer && isVisible(rightBtnContainer)) {
-                const containerBtns = Array.from(rightBtnContainer.querySelectorAll('button')).filter(isVisible);
-                if (containerBtns.length > 0) {
+            // 0a) ПРИОРИТЕТ: класс "Download-manager__*" — это и есть Excel-кнопка
+            //     (а "Download-manager-wrapper__*" — История загрузок).
+            //     Уникальный селектор, который НЕ путается с dropdown "Без детализации".
+            const dmContainers = Array.from(
+                document.querySelectorAll("[class*='Download-manager__']:not([class*='Download-manager-wrapper'])")
+            ).filter(isVisible);
+            for (const dm of dmContainers) {
+                const btn = dm.querySelector('button');
+                if (btn && isVisible(btn)) {
+                    const res = tryClick(btn, 'Download-manager-direct');
+                    if (res) return res;
+                }
+            }
+
+            // 0b) Контейнер 'Sales-funnel-table-header__right-buttons' (новый класс 2026-05).
+            //     ВНИМАНИЕ: их на странице ДВА с одинаковым классом:
+            //       [0] содержит dropdown "Без детализации" (Detalization-select-view)
+            //       [1] содержит Excel/Download/Settings (Download-manager*)
+            //     Игнорируем тот, что содержит Detalization-select / Select__/ input[id*=select].
+            const rightBtnSelectors = [
+                "[class*='Sales-funnel-table-header__right-buttons']",
+                "[class*='Sales-funnel-stages-table-header-view__right-buttons']",
+                "[class*='funnel'][class*='right-buttons']",
+                "[class*='right-buttons']"
+            ];
+            for (const sel of rightBtnSelectors) {
+                const containers = Array.from(document.querySelectorAll(sel)).filter(isVisible);
+                if (containers.length === 0) continue;
+                // Фильтруем — пропускаем контейнер с Detalization/Select dropdown'ом
+                const actionContainers = containers.filter(c =>
+                    !c.querySelector("[class*='Detalization-select']") &&
+                    !c.querySelector("[class*='Select__']") &&
+                    !c.querySelector("input[id*='select' i]")
+                );
+                const pool = actionContainers.length > 0 ? actionContainers : containers;
+                for (const c of pool) {
+                    const containerBtns = Array.from(c.querySelectorAll('button')).filter(isVisible);
+                    if (containerBtns.length === 0) continue;
                     // Сортируем по X (слева направо) — Excel самый левый
                     containerBtns.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-                    const res = tryClick(containerBtns[0], 'funnel-right-buttons[' + containerBtns.length + ']');
+                    const res = tryClick(containerBtns[0], 'right-buttons[' + sel + ',n=' + containerBtns.length + ',filtered=' + actionContainers.length + ']');
                     if (res) return res;
                 }
             }
@@ -650,16 +679,21 @@ def download_wb_report_v2(target_date: date = None, output_dir: Path = None):
                 }
             }
 
-            // 5) Фолбэк: старая логика по классу onlyIcon (если хэш ещё актуален),
-            //    НО фильтруем по Y > 600 (отбрасываем сайдбар и навигацию)
-            const onlyIconBtns = allBtns.filter(b => /onlyIcon/i.test(b.className || ''))
-                .filter(b => {
-                    const r = b.getBoundingClientRect();
-                    return r.top > 500;  // отсекаем шапку и сайдбар
-                });
-            if (onlyIconBtns.length > 0) {
-                onlyIconBtns.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-                const res = tryClick(onlyIconBtns[0], 'onlyIcon-class-Y>500:' + onlyIconBtns.length);
+            // 5) Фолбэк: ищем icon-кнопки ВНУТРИ заголовка таблицы воронки.
+            //    Чтобы случайно не кликнуть Help/Notification — ограничиваем зоной заголовка.
+            const tableHeaders = Array.from(document.querySelectorAll(
+                "[class*='Sales-funnel-table-header'], [class*='Sales-funnel-stages-table-header-view'], [class*='funnel'][class*='header']"
+            )).filter(isVisible);
+            for (const h of tableHeaders) {
+                const btns = Array.from(h.querySelectorAll('button')).filter(b =>
+                    isVisible(b) && /onlyIcon/i.test(b.className || '')
+                );
+                if (btns.length === 0) continue;
+                btns.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+                // ВНИМАНИЕ: если кнопок ровно одна — это, скорее всего, Excel.
+                //           Если 2 — Excel + Download, берём левую.
+                //           Если 3+ — Excel самая левая.
+                const res = tryClick(btns[0], 'header-onlyIcon[n=' + btns.length + ']');
                 if (res) return res;
             }
 
@@ -792,7 +826,8 @@ def download_wb_report_v2(target_date: date = None, output_dir: Path = None):
         
         # --- INITIAL CHECK ---
         # Открываем менеджер загрузок — это 2-я (по X) кнопка в контейнере
-        # 'Sales-funnel-stages-table-header-view__right-buttons'.
+        # 'Sales-funnel-table-header__right-buttons' (актуальный класс на 2026-05-20).
+        # Раньше назывался 'Sales-funnel-stages-table-header-view__right-buttons' — оставлен fallback.
         # Сначала прокручиваем к контейнеру (модалка могла сместить viewport).
         log.info(f"Performing initial check for 'Формируется' status...")
 
@@ -803,23 +838,45 @@ def download_wb_report_v2(target_date: date = None, output_dir: Path = None):
                     const r = el.getBoundingClientRect();
                     return r.width > 0 && r.height > 0 && el.offsetParent !== null;
                 };
-                const container = document.querySelector(
-                    "[class*='Sales-funnel-stages-table-header-view__right-buttons']"
-                );
-                if (!container || !isVisible(container)) {
-                    return { ok: false, reason: 'no right-buttons container' };
+                // 1) ПРИОРИТЕТ: специфичный класс "Download-manager-wrapper__*" =
+                //    кнопка "История загрузок" (рядом с Excel'ом в Download-manager__).
+                const wrapper = Array.from(document.querySelectorAll("[class*='Download-manager-wrapper']")).filter(isVisible)[0];
+                if (wrapper) {
+                    const btn = wrapper.querySelector('button');
+                    if (btn && isVisible(btn)) {
+                        btn.scrollIntoView({ block: 'center', behavior: 'instant' });
+                        btn.click();
+                        const r = btn.getBoundingClientRect();
+                        return { ok: true, via: 'Download-manager-wrapper', rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+                    }
                 }
-                // Прокрутить контейнер во viewport
-                container.scrollIntoView({ block: 'center', behavior: 'instant' });
-                const btns = Array.from(container.querySelectorAll('button')).filter(isVisible);
-                if (btns.length < 2) {
-                    return { ok: false, reason: 'less than 2 buttons in container', count: btns.length };
+                // 2) Фолбэк: контейнер right-buttons (отфильтрованный от Detalization-select)
+                const selectors = [
+                    "[class*='Sales-funnel-table-header__right-buttons']",
+                    "[class*='Sales-funnel-stages-table-header-view__right-buttons']",
+                    "[class*='funnel'][class*='right-buttons']",
+                    "[class*='right-buttons']"
+                ];
+                for (const sel of selectors) {
+                    const containers = Array.from(document.querySelectorAll(sel)).filter(isVisible);
+                    const action = containers.filter(c =>
+                        !c.querySelector("[class*='Detalization-select']") &&
+                        !c.querySelector("[class*='Select__']") &&
+                        !c.querySelector("input[id*='select' i]")
+                    );
+                    const pool = action.length > 0 ? action : containers;
+                    for (const container of pool) {
+                        container.scrollIntoView({ block: 'center', behavior: 'instant' });
+                        const btns = Array.from(container.querySelectorAll('button')).filter(isVisible);
+                        if (btns.length < 2) continue;
+                        btns.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
+                        // [0] = Excel, [1] = История загрузок, [2] = Settings
+                        btns[1].click();
+                        const r = btns[1].getBoundingClientRect();
+                        return { ok: true, via: 'right-buttons:' + sel, count: btns.length, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+                    }
                 }
-                btns.sort((a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left);
-                // [0] = Excel, [1] = История загрузок, [2] = Settings
-                btns[1].click();
-                const r = btns[1].getBoundingClientRect();
-                return { ok: true, count: btns.length, rect: { x: r.left, y: r.top, w: r.width, h: r.height } };
+                return { ok: false, reason: 'no downloads button found' };
             }''')
 
         # Подождём чтобы отчёт успел появиться в очереди формирования

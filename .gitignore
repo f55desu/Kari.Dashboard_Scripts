@@ -28,3 +28,4 @@ Dashboard_WB_Assembly_AutoPipeline.exe
 Dashboard_WB_Assembly_AutoPipeline.spec
 *.log
 *.spec
+Preprocessing/page_debug*
