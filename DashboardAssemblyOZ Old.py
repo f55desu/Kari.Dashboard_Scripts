@@ -424,8 +424,9 @@ def assemble():
         df_zatraty_list.append(df)
 
     df_zatraty = pd.concat(df_zatraty_list, ignore_index=True)
-    # [v2] Раньше "Оплата за заказ: выбранные товары" склеивалось с "Оплата за клик".
-    # Теперь сохраняем тип как есть — он соответствует одной из 4-х новых категорий.
+    # [new-types] Старая конвертация 'Оплата за заказ: выбранные товары' -> 'Оплата за клик'
+    # больше не нужна: ниже мы перезаписываем ТипАктивности на основании
+    # Инструмент / Место размещения из df_all и оставляем исходные новые типы.
     # df_zatraty.loc[df_zatraty['ТипАктивности'] == 'Оплата за заказ: выбранные товары', 'ТипАктивности'] = 'Оплата за клик'
 
     # 10. Получить данные таблицы с SQL (Цены)
@@ -720,33 +721,34 @@ def assemble():
         validate='m:1'  # каждая строка затрат должна найти максимум одну строку в df_all
     )
 
-    # ===== ШАГ 3 [v2]: Создаём ТипАктивности В ЗАТРАТАХ по новым 4 категориям =====
-    # Источники классификации:
-    #   1. Инструмент = "Оплата за заказ: выбранные товары"      → "Оплата за заказ: выбранные товары"
-    #   2. Инструмент = "Оплата за клик" + Место = "Поиск"        → "Оплата за клик: поиск"
-    #   3. Инструмент = "Оплата за клик" + любое другое/NaN       → "Оплата за клик: поиск и рекомендации"
-    #   4. Расход = 0/NaN                                          → "Органика" (последним, перебивает платные с нулём)
+    # ===== ШАГ 3: Создаём ТипАктивности В ЗАТРАТАХ (до слияния с воронкой) =====
     df_zatraty_enriched['ТипАктивности'] = np.nan
 
+    # [new-types] Стандартизированные типы продвижения OZ:
+    #   'Оплата за заказ: выбранные товары'      (Инструмент = 'Оплата за заказ: выбранные товары')
+    #   'Оплата за клик: поиск'                  (Инструмент = 'Оплата за клик' + Место размещения = 'Поиск')
+    #   'Оплата за клик: поиск и рекомендации'   (Инструмент = 'Оплата за клик' + любое другое Место/NaN)
+    #   'Органика'                               (Расход = 0/NaN — выставляется последним)
+
     # 1) Оплата за заказ: выбранные товары
-    mask_zakaz = (df_zatraty_enriched['Инструмент'] == 'Оплата за заказ: выбранные товары')
-    df_zatraty_enriched.loc[mask_zakaz, 'ТипАктивности'] = 'Оплата за заказ: выбранные товары'
+    mask_zakaz_selected = (df_zatraty_enriched['Инструмент'] == 'Оплата за заказ: выбранные товары')
+    df_zatraty_enriched.loc[mask_zakaz_selected, 'ТипАктивности'] = 'Оплата за заказ: выбранные товары'
 
     # 2) Оплата за клик: поиск
-    mask_klik_search = (
+    mask_klik_poisk = (
         (df_zatraty_enriched['Инструмент'] == 'Оплата за клик') &
         (df_zatraty_enriched['Место размещения'] == 'Поиск')
     )
-    df_zatraty_enriched.loc[mask_klik_search, 'ТипАктивности'] = 'Оплата за клик: поиск'
+    df_zatraty_enriched.loc[mask_klik_poisk, 'ТипАктивности'] = 'Оплата за клик: поиск'
 
-    # 3) Оплата за клик: поиск и рекомендации (включая случаи с пустым/иным Местом размещения)
-    mask_klik_recs = (
-        (df_zatraty_enriched['Инструмент'] == 'Оплата за клик') & ~mask_klik_search
+    # 3) Оплата за клик: поиск и рекомендации (fallback: 'Оплата за клик' с любым НЕ-'Поиск' местом или NaN)
+    mask_klik_poisk_rec = (
+        (df_zatraty_enriched['Инструмент'] == 'Оплата за клик') & ~mask_klik_poisk
     )
-    df_zatraty_enriched.loc[mask_klik_recs, 'ТипАктивности'] = 'Оплата за клик: поиск и рекомендации'
+    df_zatraty_enriched.loc[mask_klik_poisk_rec, 'ТипАктивности'] = 'Оплата за клик: поиск и рекомендации'
 
-    # 4) Органика — нулевой/отсутствующий расход (применяется ПОСЛЕДНИМ, перебивает платные с нулём)
-    spend_col = next((c for c in ['Расход, ₽','Расход, руб','Расход, Р','Расход']
+    # Органика (расход = 0)
+    spend_col = next((c for c in ['Расход, ₽','Расход, руб','Расход, Р','Расход'] 
                     if c in df_zatraty_enriched.columns), None)
     if spend_col:
         df_zatraty_enriched[spend_col] = pd.to_numeric(
@@ -1124,13 +1126,8 @@ def assemble():
     def build_funnel_wide(
         df_raw: pd.DataFrame,
         funnel_columns: list,
-        # [v2] 4 новых типа активности:
-        all_types=(
-            'Оплата за клик: поиск и рекомендации',
-            'Оплата за клик: поиск',
-            'Оплата за заказ: выбранные товары',
-            'Органика',
-        ),
+        # [new-types] стандартизированный набор типов продвижения OZ
+        all_types=('Оплата за клик: поиск и рекомендации', 'Оплата за клик: поиск', 'Оплата за заказ: выбранные товары', 'Органика'),
         infer_organic_by_zero_spend=False,
         spend_col='Расход, ₽',
         extra_agg='first',          # 'first' | 'join'
@@ -1150,8 +1147,8 @@ def assemble():
 
         # ---- 1) Нормализуем тип активности ----
         type_col = 'ТипАктивности'
-        # [v2] Старый replace 'ТОП' → 'Вывод в топ' больше не нужен.
-        # df[type_col] = df[type_col].replace({'ТОП': 'Вывод в топ'})
+        # [new-types] было: 'ТОП' -> 'Вывод в топ'
+        df[type_col] = df[type_col].replace({'ТОП': 'Оплата за клик: поиск'})
         if infer_organic_by_zero_spend and spend_col in df.columns:
             m0 = pd.to_numeric(df[spend_col], errors='coerce').fillna(0).eq(0)
             df.loc[m0, type_col] = 'Органика'
@@ -1282,33 +1279,44 @@ def assemble():
         out = out[[c for c in ordered if c in out.columns]].copy()
         return out
 
-    # [v2] Динамически собираем порядок колонок под новые 4 типа активности.
-    # Раньше тут был статический список под старые префиксы (Вывод в топ / Трафарет / Оплата за заказ / Органика).
-    NEW_TYPES = (
-        'Оплата за клик: поиск и рекомендации',
-        'Оплата за клик: поиск',
-        'Оплата за заказ: выбранные товары',
-        'Органика',
-    )
-    # Базовые имена метрик (порядок), которые разворачиваются по типам
-    _metric_order = [c for c in funnel_columns_widing
-                     if c not in ('Дата', 'Артикул', 'Артикул OZ', 'ТипАктивности')]
-    # Дополнительные размерности из df_funnel_reference, попавшие через extra_cols в build_funnel_wide
-    _key_set = {'Дата', 'Артикул', 'Артикул OZ', 'ТипАктивности'}
-    _extra_dims = [c for c in df_funnel_reference.columns
-                   if c not in _key_set and c not in _metric_order]
-
+    # [new-types] Префиксы старых типов заменены на стандартизированные:
+    #   'Вывод в топ'    -> 'Оплата за клик: поиск'
+    #   'Трафарет'       -> 'Оплата за клик: поиск и рекомендации'
+    #   'Оплата за заказ' -> 'Оплата за заказ: выбранные товары'
+    # Имена метрик не меняются.
+    _NEW_TYPES = ('Оплата за клик: поиск и рекомендации', 'Оплата за клик: поиск', 'Оплата за заказ: выбранные товары', 'Органика')
+    _METRICS_ORDER = [
+        'Показы, всего', 'Показы на карточке товара', 'Показы в поиске и каталоге',
+        'Позиция в поиске и каталоге', 'В корзину, всего', 'Заказано товаров',
+        'Отменено товаров', 'Доставлено товаров', 'Возвращено товаров',
+        'Заказано на сумму', 'В корзину из карточки товара', 'Выкупили ШТ',
+        'Расход, ₽', 'Рекламные заказано на сумму', 'Рекламные заказано товаров',
+        'Рекламные показы', 'Рекламные показы на карточке товара', 'Цена',
+    ]
+    _BASE_COLS = [
+        'Дата', 'Артикул', 'Артикул OZ', 'ТипАктивности',
+        'Наименование', 'Коллекция', 'Бренд', 'Сезон', 'Направление',
+        'Розничный отдел', 'Модель', 'Группа', 'Бизнес-группа', 'Техсегмент',
+        'Байер', 'Две последние коллекции', 'Основной артикул',
+        'Себестоимость с НДС', 'Процент выкупа', 'НДС',
+        'Ответственный за группу', 'Группа для отчетов',
+        'SKU из объединенной карточки',
+        'Ассоциированные заказы, руб', 'Ассоциированные заказы, шт',
+    ]
+    # Порядок типов в широкой таблице совпадает с порядком, в котором их
+    # перечисляет build_funnel_wide(all_types=...) и dataField'ы в боевой сводной:
+    # Оплата за клик: поиск и рекомендации, Оплата за клик: поиск,
+    # Оплата за заказ: выбранные товары, Органика.
+    _PREFIX_ORDER = ('Оплата за клик: поиск', 'Оплата за клик: поиск и рекомендации',
+                     'Оплата за заказ: выбранные товары', 'Органика')
     final_after_widing_columns = (
-        ['Дата', 'Артикул', 'Артикул OZ', 'ТипАктивности']
-        + _extra_dims
-        + list(NEW_TYPES)                                                       # бинарные флаги типов
-        + [f'{t}_{m}' for m in _metric_order for t in NEW_TYPES]                 # префиксные метрики
-        + _metric_order                                                          # итоги без префикса
+        _BASE_COLS
+        + list(_PREFIX_ORDER)
+        + [f'{t}_{m}' for m in _METRICS_ORDER for t in _PREFIX_ORDER]
+        + _METRICS_ORDER
     )
 
     out = build_funnel_wide(df_raw=df_funnel_reference, funnel_columns=funnel_columns_widing)
-    # Оставляем только реально присутствующие колонки (защита от опечаток / отсутствия типа в данных)
-    final_after_widing_columns = [c for c in final_after_widing_columns if c in out.columns]
     out = out[final_after_widing_columns]
     df_funnel_reference = out
 
@@ -1397,41 +1405,47 @@ def assemble():
     except Exception as e:
         print(f"Ошибка при создании таблицы ДБсПризнаками: {e}")
 
-    # 19. [v2] Дополнительная\финальная правка ТипАктивности под новые 4 типа.
-    # Платные типы по убыванию приоритета (для красивого combo «А/Б», если строка попала под несколько):
-    type_order_paid = [
-        'Оплата за клик: поиск и рекомендации',
-        'Оплата за клик: поиск',
-        'Оплата за заказ: выбранные товары',
-    ]
-    paid_cols = [c for c in type_order_paid if c in df_final_db_all_features.columns]
+    # 19. Дополнительная\финальная правка ТипАктивности
+    # import numpy as np
+    # df — ваша широкая таблица с флагами типов (1/0)
+    # [new-types] было: ['Вывод в топ', 'Трафарет', 'Оплата за заказ']
+    type_order_paid = ['Оплата за клик: поиск', 'Оплата за клик: поиск и рекомендации', 'Оплата за заказ: выбранные товары']
+    paid_cols = [c for c in type_order_paid if c in df_final_db_all_features.columns]  # на случай отсутствующих
 
     # Матрица флагов платных типов
     flags = df_final_db_all_features[paid_cols].fillna(0).astype('uint8').to_numpy()
     labels = np.array(paid_cols, dtype=object)
 
-    # Подписи для платных комбинаций
+    # Собираем подписи для платных комбинаций
     combo = ['/'.join(labels[row.astype(bool)]) if row.any() else '' for row in flags]
     df_final_db_all_features['ТипАктивности'] = combo
 
-    # Только органика — подставим "Органика"
+    # Если есть только органика — подставим "Органика"
     if 'Органика' in df_final_db_all_features.columns:
         only_org = df_final_db_all_features['Органика'].fillna(0).astype('uint8').eq(1) & (flags.sum(axis=1) == 0)
         df_final_db_all_features.loc[only_org, 'ТипАктивности'] = 'Органика'
 
-    # Пустые — в "Органика"
+    # Пустые — на "—"
     df_final_db_all_features['ТипАктивности'] = df_final_db_all_features['ТипАктивности'].replace('', 'Органика')
 
-    # Если ярлык "Органика", но расход > 0 — это не органика, а самая частая платная категория.
-    SPEND_CANDIDATES = ['Расход, ₽', 'Расход, руб', 'Расход, Р', 'Расход']
+    # 1) Надёжно найдём колонку «Расход»
+    SPEND_CANDIDATES = ['Расход, ₽','Расход, руб','Расход, Р','Расход']
     spend_col = next((c for c in SPEND_CANDIDATES if c in df_final_db_all_features.columns), None)
     if spend_col is None:
         raise KeyError(f"Не найдена колонка расхода среди: {SPEND_CANDIDATES}")
 
+    # 2) Приведём «Расход» к числу
     spend = pd.to_numeric(df_final_db_all_features[spend_col], errors='coerce')
+
+    # 3) Маска: было «Органика» и есть расход
     is_organic = df_final_db_all_features['ТипАктивности'].astype('string').str.strip().eq('Органика')
-    has_spend = spend.fillna(0).gt(0)
+    has_spend  = spend.fillna(0).gt(0)      # строго > 0
+    # если вы хотели «> 0 ИЛИ not null», используйте так:
+    # has_spend = spend.notna() | spend.fillna(0).gt(0)
     mask = is_organic & has_spend
+
+    # 4) Замена
+    # [new-types] было: 'Трафарет' -> 'Оплата за клик: поиск и рекомендации'
     df_final_db_all_features.loc[mask, 'ТипАктивности'] = 'Оплата за клик: поиск и рекомендации'
 
 
@@ -1458,125 +1472,10 @@ def assemble():
 
     print('Shape df_final_db_all_features: ' + str(df_final_db_all_features.shape))
 
-    # =====================================================================
-    # 21 [v2]. Переименование колонок согласно "Описание столбцов дашборда ОЗ.xlsx"
-    # =====================================================================
-    # База: для метрик берём из строк итогов (без префикса) и из ключей/измерений.
-    # Префиксные колонки получают новый префикс (один из 4 типов) + новое тело метрики.
-    NEW_TYPES_RENAME = (
-        'Оплата за клик: поиск и рекомендации',
-        'Оплата за клик: поиск',
-        'Оплата за заказ: выбранные товары',
-        'Органика',
-    )
-
-    # Базовые тела метрик: старое имя метрики -> новое
-    METRIC_BODY_MAP = {
-        'Показы, всего':                       'Количество показов товара',
-        'Показы на карточке товара':           'Просмотры карточки товара',
-        'Показы в поиске и каталоге':          'Показы в поиске и каталоге',
-        'Позиция в поиске и каталоге':         'Средняя позиция в поиске и каталоге',
-        'В корзину, всего':                    'Добавлений в корзину всего',
-        'Заказано товаров':                    'Количество заказанных товаров',
-        'Отменено товаров':                    'Количество отменённых товаров',
-        'Доставлено товаров':                  'Количество доставленных товаров',
-        'Возвращено товаров':                  'Количество возвращённых товаров',
-        'Заказано на сумму':                   'Сумма заказов',
-        'В корзину из карточки товара':        'Добавлений в корзину из карточки товара',
-        'Выкупили ШТ':                         'Количество выкупленных товаров',
-        'Расход, ₽':                           'Расходы на рекламу',
-        'Рекламные заказано на сумму':         'Сумма заказов от рекламы',
-        'Рекламные заказано товаров':          'Количество заказанных товаров от рекламы',
-        'Рекламные показы':                    'Количество рекламных показов',
-        'Рекламные показы на карточке товара': 'Количество кликов по рекламе',
-        'Цена':                                'Розничная цена товара',
-    }
-
-    # Прямое переименование (ключи / измерения / справочник / признаки / служебные)
-    DIRECT_RENAME = {
-        'Дата':                          'Дата отчёта',
-        # 'Артикул' и 'Артикул OZ' оставляем без переименования (по требованию)
-        'ТипАктивности':                 'Тип рекламной активности',
-        'Наименование':                  'Наименование товара',
-        'Коллекция':                     'Коллекция',
-        'Бренд':                         'Бренд товара',
-        'Сезон':                         'Сезон',
-        'Направление':                   'Направление',
-        'Розничный отдел':               'Розничный отдел',
-        'Модель':                        'Модель',
-        'Группа':                        'Товарная группа',
-        'Бизнес-группа':                 'Бизнес-группа',
-        'Техсегмент':                    'Технологический сегмент',
-        'Байер':                         'Байер',
-        'Две последние коллекции':       'Две последние коллекции',
-        'Основной артикул':              'Основной артикул',
-        'Себестоимость с НДС':           'Себестоимость товара с НДС',
-        'Процент выкупа':                'Процент выкупа',
-        'НДС':                           'Ставка НДС',
-        'Ответственный за группу':       'Ответственный за товарную группу',
-        'Группа для отчетов':            'Группа для отчётов',
-        'SKU из объединенной карточки':  'Идентификатор объединённой карточки на Озон',
-        'Ассоциированные заказы, руб':   'Сумма ассоциированных заказов',
-        'Ассоциированные заказы, шт':    'Количество ассоциированных заказов',
-        'Остаток Агрегатора':            'Остаток товара на складе агрегатора',
-        'Дистрибуция':                   'Дистрибуция размеров',
-        'Признак Артикула 1':            'Признак товара 1',
-        'Признак Артикула 2':            'Признак товара 2',
-        'Признак Артикула 3':            'Признак товара 3',
-        'Признак Артикула 4':            'Признак товара 4',
-        'Признак Артикула 5':            'Признак товара 5',
-        'Признак Даты 1':                'Признак даты 1',
-        'Признак Даты 2':                'Признак даты 2',
-        'Признак Даты 3':                'Признак даты 3',
-        'Признак Даты 4':                'Признак даты 4',
-        'Признак Даты 5':                'Признак даты 5',
-        'Текущая склейка':               'Идентификатор текущей склейки товара',
-    }
-    # Итоги без префикса = переименование тела метрики
-    DIRECT_RENAME.update(METRIC_BODY_MAP)
-    # Бинарные флаги типов
-    FLAG_RENAME = {
-        'Оплата за клик: поиск и рекомендации': 'Признак активности Оплата за клик: поиск и рекомендации',
-        'Оплата за клик: поиск':                'Признак активности Оплата за клик: поиск',
-        'Оплата за заказ: выбранные товары':    'Признак активности Оплата за заказ: выбранные товары',
-        'Органика':                             'Признак органического трафика',
-    }
-
-    def _build_full_rename_map(columns):
-        rename = {}
-        for col in columns:
-            if col in DIRECT_RENAME:
-                rename[col] = DIRECT_RENAME[col]
-                continue
-            if col in FLAG_RENAME:
-                rename[col] = FLAG_RENAME[col]
-                continue
-            # Префиксные: <тип>_<метрика>
-            for t in NEW_TYPES_RENAME:
-                pref = t + '_'
-                if col.startswith(pref):
-                    body = col[len(pref):]
-                    new_body = METRIC_BODY_MAP.get(body, body)
-                    rename[col] = f'{t}_{new_body}'
-                    break
-        return rename
-
-    rename_map = _build_full_rename_map(df_final_db_all_features.columns.tolist())
-    df_final_db_all_features = df_final_db_all_features.rename(columns=rename_map)
-
-    # Защита от дубликатов
-    cols = list(df_final_db_all_features.columns)
-    if len(cols) != len(set(cols)):
-        from collections import Counter
-        dup = [c for c, n in Counter(cols).items() if n > 1]
-        raise RuntimeError(f"[v2] После переименования возникли дубликаты колонок: {dup}")
-
-    print(f"[v2] Колонок после переименования: {len(cols)}; дубликатов: 0")
-
-    # 22 [v2]. Сохранить df_final_db_all_features в ТЕСТОВЫЙ csv (не перетирая боевой)
+    # 21. Сохранить df_final_db_all_features в csv
+    # Сохранение финальной таблицы
     table = pa.Table.from_pandas(df_final_db_all_features)
-    csv.write_csv(table, os.path.join(FOLDER_PATH, "Тест_ДБсПризнаками_Ozon.csv"))
-    print(f"[v2] Сохранён тестовый CSV: {os.path.join(FOLDER_PATH, 'Тест_ДБсПризнаками_Ozon.csv')}")
+    csv.write_csv(table, os.path.join(FOLDER_PATH, "ДБсПризнаками_Ozon.csv"))
 
 
     # 22. Обновляем и сохраняем Excel-файл
@@ -1631,58 +1530,23 @@ def assemble():
 
         return False  # Все попытки завершились неудачно
 
-    # [v2] Тестовый запуск: НЕ обновляем боевой "Показы и затраты ОЗ_2.0.xlsx".
-    # Достаточно созданного выше Тест_ДБсПризнаками_Ozon.csv для проверки.
-    print("[v2] Тестовый прогон: обновление боевого Excel-файла пропущено.")
-    # return  # ранний выход из assemble(); ниже — старый код, оставлен закомментированным.
-
-    try:  # [v2] dead code (оставлен, чтобы не терять историю; не выполняется из-за return выше)
+    try:
         print("Подготовка данных для ДБ завершена.")
         # input("Начать обновление файлов ДБ? Для подтверждения нажмите Enter...")
-        print("Начинаем обновлять файл 'Показы и затраты ОЗ_2.0_Test.xlsx'...")
+        print("Начинаем обновлять файл 'Показы и затраты ОЗ_2.0.xlsx'...")
         start_time = time.time()  # Запускаем таймер
 
         # Путь к исходному файлу
-        file_path_shows_expenses = os.path.join(FOLDER_PATH_FOR_DB, "Показы и затраты ОЗ_2.0_Test.xlsx")
+        file_path_shows_expenses = os.path.join(FOLDER_PATH_FOR_DB, "Показы и затраты ОЗ_2.0.xlsx")
 
         if os.path.exists(file_path_shows_expenses):
             # Создаем новое имя файла с текущей датой без года
             current_month_day = time.strftime("%d.%m")  # Текущая дата в формате ДД.ММ
-            new_file_name = f"Показы и затраты ОЗ_2.0 {current_month_day}_Test.xlsx"
+            new_file_name = f"Показы и затраты ОЗ_2.0 {current_month_day}.xlsx"
             new_file_path = os.path.join(FOLDER_PATH_FEATURES, new_file_name)
 
             # Путь для сохранения в дополнительную папку FOLDER_PATH_DUDL
-            # dudl_file_path = os.path.join(FOLDER_PATH_DUDL, new_file_name)
-
-            # # Удаляем старые файлы из FOLDER_PATH_DUDL
-            # try:
-            #     if os.path.exists(FOLDER_PATH_DUDL):
-            #         for filename in os.listdir(FOLDER_PATH_DUDL):
-            #             # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
-            #             match = re.match(r"Показы и затраты ОЗ_2\.0 (\d{2}\.\d{2})\_Test.xlsx", filename)
-            #             if match:
-            #                 file_date = match.group(1)  # Извлекаем дату из имени файла
-            #                 if file_date != current_month_day:  # Сравниваем с текущей датой
-            #                     file_to_delete = os.path.join(FOLDER_PATH_DUDL, filename)
-            #                     os.remove(file_to_delete)
-            #                     print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_DUDL}'.")
-            # except Exception as delete_error:
-            #     print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_DUDL}': {delete_error}")
-
-            # Удаляем старые файлы из FOLDER_PATH_FEATURES
-            # try:
-            #     if os.path.exists(FOLDER_PATH_FEATURES):
-            #         for filename in os.listdir(FOLDER_PATH_FEATURES):
-            #             # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
-            #             match = re.match(r"Показы и затраты ОЗ_2\.0 (\d{2}\.\d{2})\_Test.xlsx", filename)
-            #             if match:
-            #                 file_date = match.group(1)  # Извлекаем дату из имени файла
-            #                 if file_date != current_month_day:  # Сравниваем с текущей датой
-            #                     file_to_delete = os.path.join(FOLDER_PATH_FEATURES, filename)
-            #                     os.remove(file_to_delete)
-            #                     print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_FEATURES}'.")
-            # except Exception as delete_error:
-            #     print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_FEATURES}': {delete_error}")
+            dudl_file_path = os.path.join(FOLDER_PATH_DUDL, new_file_name)
 
             # Пытаемся обновить и сохранить файл
             success = update_and_save_excel(file_path_shows_expenses, new_file_path)
@@ -1697,19 +1561,49 @@ def assemble():
                 print("Файл успешно обновлен после повторной попытки.")
 
             # После успешного обновления копируем файл в папку FOLDER_PATH_DUDL
-            # if success:
-            #     try:
-            #         shutil.copy(new_file_path, dudl_file_path)
-            #         print(f"Файл успешно скопирован в папку '{FOLDER_PATH_DUDL}'.")
-            #     except Exception as copy_error:
-            #         print(f"Ошибка при копировании файла в папку '{FOLDER_PATH_DUDL}': {copy_error}")
+            if success:
+                # Удаляем старые файлы из FOLDER_PATH_DUDL
+                try:
+                    if os.path.exists(FOLDER_PATH_DUDL):
+                        for filename in os.listdir(FOLDER_PATH_DUDL):
+                            # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
+                            match = re.match(r"Показы и затраты ОЗ_2\.0 (\d{2}\.\d{2})\.xlsx", filename)
+                            if match:
+                                file_date = match.group(1)  # Извлекаем дату из имени файла
+                                if file_date != current_month_day:  # Сравниваем с текущей датой
+                                    file_to_delete = os.path.join(FOLDER_PATH_DUDL, filename)
+                                    os.remove(file_to_delete)
+                                    print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_DUDL}'.")
+                except Exception as delete_error:
+                    print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_DUDL}': {delete_error}")
+
+                # Удаляем старые файлы из FOLDER_PATH_FEATURES
+                try:
+                    if os.path.exists(FOLDER_PATH_FEATURES):
+                        for filename in os.listdir(FOLDER_PATH_FEATURES):
+                            # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
+                            match = re.match(r"Показы и затраты ОЗ_2\.0 (\d{2}\.\d{2})\.xlsx", filename)
+                            if match:
+                                file_date = match.group(1)  # Извлекаем дату из имени файла
+                                if file_date != current_month_day:  # Сравниваем с текущей датой
+                                    file_to_delete = os.path.join(FOLDER_PATH_FEATURES, filename)
+                                    os.remove(file_to_delete)
+                                    print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_FEATURES}'.")
+                except Exception as delete_error:
+                    print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_FEATURES}': {delete_error}")
+
+                try:
+                    shutil.copy(new_file_path, dudl_file_path)
+                    print(f"Файл успешно скопирован в папку '{FOLDER_PATH_DUDL}'.")
+                except Exception as copy_error:
+                    print(f"Ошибка при копировании файла в папку '{FOLDER_PATH_DUDL}': {copy_error}")
 
             elapsed_time = time.time() - start_time  # Вычисляем затраченное время
             print(f"Файл успешно обновлен и сохранен. Время выполнения: {format_elapsed_time(elapsed_time)}")
         else:
-            print("Файл 'Показы и затраты ОЗ_2.0.xlsx_Test' не найден.")
+            print("Файл 'Показы и затраты ОЗ_2.0.xlsx' не найден.")
     except Exception as e:
-        print(f"Ошибка при обработке файла 'Показы и затраты ОЗ_2.0.xlsx_Test': {e}")
+        print(f"Ошибка при обработке файла 'Показы и затраты ОЗ_2.0.xlsx': {e}")
 
 if __name__ == "__main__":
     assemble()
