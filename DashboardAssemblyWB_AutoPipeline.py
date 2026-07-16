@@ -1,6 +1,7 @@
 import os
 import sys
 import ctypes
+import subprocess
 
 if os.name == 'nt':  # Только для Windows
     from ctypes import wintypes # Импортируем wintypes отдельно
@@ -39,6 +40,7 @@ import Preprocessing.Dashboard_WB_Wrapper as WB_Wrapper
 import Preprocessing.Dashboard_WB_Wrapper_Tuesday as WB_Wrapper_Tuesday
 from Preprocessing.wb_downloader_v2 import download_wb_report_v2
 from Preprocessing.wb_campaign_downloader import download_wb_campaign_report
+from DashboardDBUploaderWB import try_upload_latest_to_postgres as try_upload_dashboard_to_postgres
 
 import DashboardAssemblyWB
 
@@ -55,6 +57,8 @@ logging.basicConfig(
 output_dir=r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
 
 def main():
+    def run_postgres_tunnel():
+        subprocess.run([r'pgadmin_connect.bat'])
     try:
         download_wb_report_v2()
         download_wb_campaign_report()
@@ -66,7 +70,7 @@ def main():
         return False
 
     wrapper_modules = {  # pyright: ignore[reportUnreachable]
-            "wrapper": ("Dashboard_OZON_Wrapper.py", WB_Wrapper),
+            "wrapper": ("Dashboard_WB_Wrapper.py", WB_Wrapper),
             "wrapper_tuesday": ("Dashboard_WB_Wrapper_Tuesday.py", WB_Wrapper_Tuesday)
         }
         
@@ -80,7 +84,7 @@ def main():
     
     try:
         # Вызываем main() функцию напрямую
-        logging.info("🔄 Выполнение скрипта обработки данных OZON...")
+        logging.info("🔄 Выполнение скрипта обработки данных WB...")
         wrapper_module.main()
         logging.info("✅ Скрипт выполнен успешно")
         
@@ -113,6 +117,24 @@ def main():
         
         # Записываем в лог-файл
         logging.info(f'{datetime.now()} - DashboardAssemblyWB.py completed via Pipeline')
+
+        logging.info("▶️ Загрузка последнего дня дашборда в PostgreSQL...")
+        try:
+            ok = try_upload_dashboard_to_postgres()
+            if ok:
+                logging.info("✅ Загрузка дашборда в PostgreSQL завершена успешно")
+            else:
+                logging.warning("⚠️ Загрузка дашборда в PostgreSQL произошла с ошибкой. Возможно не был поднят тунель Postgres. Поднимаем тунель")
+                run_postgres_tunnel()
+                ok = try_upload_dashboard_to_postgres()
+                if ok:
+                    logging.info("✅ Загрузка дашборда в PostgreSQL завершена успешно")
+                else:
+                    logging.warning("⚠️ Загрузка дашборда в PostgreSQL пропущена (см. лог)")
+        except Exception as db_err:
+            logging.warning(f"⚠️ Загрузка дашборда в PostgreSQL пропущена: {db_err}")
+        
+        logging.info("Успех", "Скрипт успешно выполнен!")
         
         logging.info("Успех", "Скрипт успешно выполнен!")
         

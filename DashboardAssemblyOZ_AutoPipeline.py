@@ -1,6 +1,7 @@
 import os
 import sys
 import ctypes
+import subprocess
 
 if os.name == 'nt':  # Только для Windows
     from ctypes import wintypes # Импортируем wintypes отдельно
@@ -38,6 +39,8 @@ from datetime import date, datetime, timedelta
 import Preprocessing.Dashboard_OZON_Wrapper as Ozon_Wrapper
 from Preprocessing.ozon_ad_report_downloader import download_ozon_ad_report
 from Preprocessing.ozon_analytics_downloader import download_ozon_analytics_report
+from Preprocessing.ozon_funnel_api_downloader import download_ozon_funnel_report
+from DashboardDBUploaderOZ import try_upload_latest_to_postgres as try_upload_dashboard_to_postgres
 
 import DashboardAssemblyOZ
 
@@ -54,9 +57,13 @@ logging.basicConfig(
 output_dir=r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
 
 def main():
+    def run_postgres_tunnel():
+        subprocess.run([r'pgadmin_connect.bat'])
+
     try:
-        download_ozon_analytics_report()
-        download_ozon_ad_report()
+        download_ozon_analytics_report() # Deprecated scripted web downloading
+        # download_ozon_funnel_report() # API Call function
+        download_ozon_ad_report() # Deprecated scripted web downloading
         print("OZON Analytics and Ad Report downloaded successfully")
         logging.info("OZON Analytics and Ad Report downloaded successfully")
     except Exception as e:
@@ -107,6 +114,22 @@ def main():
         logging.info("🎉 СБОРКА ДАШБОРДА ЗАВЕРШЕНА!")
         
         logging.info('DashboardAssemblyOZ.py completed via Pipeline')
+
+        logging.info("▶️ Загрузка последнего дня дашборда в PostgreSQL...")
+        try:
+            ok = try_upload_dashboard_to_postgres()
+            if ok:
+                logging.info("✅ Загрузка дашборда в PostgreSQL завершена успешно")
+            else:
+                logging.warning("⚠️ Загрузка дашборда в PostgreSQL произошла с ошибкой. Возможно не был поднят тунель Postgres. Поднимаем тунель")
+                run_postgres_tunnel()
+                ok = try_upload_dashboard_to_postgres()
+                if ok:
+                    logging.info("✅ Загрузка дашборда в PostgreSQL завершена успешно")
+                else:
+                    logging.warning("⚠️ Загрузка дашборда в PostgreSQL пропущена (см. лог)")
+        except Exception as db_err:
+            logging.warning(f"⚠️ Загрузка дашборда в PostgreSQL пропущена: {db_err}")
         
         logging.info("Успех", "Скрипт успешно выполнен!")
         
