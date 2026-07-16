@@ -7,6 +7,7 @@ build
 dist
 __pycache__
 Preprocessing/__pycache__
+Preprocessing/config
 Preprocessing/build
 Preprocessing/dist
 Preprocessing/Воронка ВБ Эталон.xlsx
@@ -21,4 +22,16 @@ Dashboard_WB_Assembly.exe
 Dashboard_WB_Assembly.spec
 Dashboard_OZ_Assembly.exe
 Dashboard_OZ_Assembly.spec
-logs.log
+Dashboard_OZ_Assembly_AutoPipeline.exe
+Dashboard_OZ_Assembly_AutoPipeline.spec
+Dashboard_WB_Assembly_AutoPipeline.exe
+Dashboard_WB_Assembly_AutoPipeline.spec
+*.log
+*.spec
+Preprocessing/page_debug*
+analytics_tunnel.vbs
+*remote_desktop_taldykin
+*.env
+Preprocessing/ozon_union_README.md
+remote_desktop_taldykin.pub
+pgadmin_connect.bat

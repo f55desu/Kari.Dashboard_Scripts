@@ -2,20 +2,21 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import os
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 
 # Direct imports of wrapper scripts
 import Dashboard_WB_Wrapper
 import Dashboard_WB_Wrapper_Tuesday
 import Dashboard_WB_Wrapper_Monday
 
-
+from wb_downloader_v2 import download_wb_report_v2
+from wb_campaign_downloader import download_wb_campaign_report
 
 class DashboardGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Dashboard WB Wrapper - Графический интерфейс")
-        self.root.geometry("800x700")
+        self.root.geometry("800x850")
         self.root.resizable(False, False)
         
         # Переменные для хранения путей
@@ -23,6 +24,10 @@ class DashboardGUI:
         self.folder_wb_var = tk.StringVar(value=r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\ВЫГРУЗКА воронка ВБ")
         self.folder_zatraty_wb_var = tk.StringVar(value=r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\Затраты ВБ")
         self.folder_week_var = tk.StringVar(value=r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Показатели по неделям ВБ")
+        
+        # Чекбоксы сценариев
+        self.do_download_var = tk.IntVar(value=1)
+        self.do_preprocess_var = tk.IntVar(value=1)
         
         # Переменная для выбора wrapper
         self.wrapper_choice = tk.StringVar(value="wrapper")
@@ -115,20 +120,37 @@ class DashboardGUI:
         # --- Кнопка запуска ---
         button_frame = tk.Frame(main_frame)
         button_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        run_button = tk.Button(
+
+        options_frame = tk.LabelFrame(button_frame, text="Что выполнить", font=("Arial", 11, "bold"), padx=10, pady=8)
+        options_frame.pack(fill=tk.X, pady=(0, 8))
+
+        tk.Checkbutton(
+            options_frame,
+            text="1. Выгрузка данных",
+            variable=self.do_download_var,
+            font=("Arial", 10),
+        ).pack(anchor=tk.W)
+
+        tk.Checkbutton(
+            options_frame,
+            text="2. Запуск препроцессинга",
+            variable=self.do_preprocess_var,
+            font=("Arial", 10),
+        ).pack(anchor=tk.W)
+
+        run_all_button = tk.Button(
             button_frame,
-            text="▶️ Запустить выбранный скрипт",
-            command=self.run_wrapper,
+            text="▶️ Запустить",
+            command=self.run_selected_actions,
             font=("Arial", 12, "bold"),
-            bg="#8e44ad",
+            bg="#9b59b6",
             fg="white",
-            activebackground="#8e13ae",
+            activebackground="#8e44ad",
             activeforeground="white",
             pady=10,
-            cursor="hand2"
+            cursor="hand2",
         )
-        run_button.pack(fill=tk.X)
+        run_all_button.pack(fill=tk.X)
         
         # --- Лог-консоль ---
         log_frame = tk.LabelFrame(main_frame, text="Лог выполнения", font=("Arial", 12, "bold"), padx=10, pady=10)
@@ -321,6 +343,32 @@ class DashboardGUI:
         self.log_text.config(state=tk.DISABLED)
         self.root.update()
         
+    def _clear_log(self):
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete(1.0, tk.END)
+        self.log_text.config(state=tk.DISABLED)
+
+    def run_selected_actions(self):
+        """Запускает выбранные действия по чекбоксам"""
+        self._clear_log()
+
+        do_download = bool(self.do_download_var.get())
+        do_preprocess = bool(self.do_preprocess_var.get())
+
+        if not do_download and not do_preprocess:
+            messagebox.showwarning("Ничего не выбрано", "Отметьте хотя бы один чекбокс.")
+            return
+
+        download_ok = True
+        if do_download:
+            download_ok = self._run_wb_downloader()
+
+        if do_preprocess:
+            if do_download and not download_ok:
+                self.log_message("⛔ Препроцессинг НЕ запускается, т.к. выгрузка завершилась с ошибкой.")
+                return
+            self._run_wrapper() 
+
     def run_wrapper(self):
         """Запускает выбранный wrapper скрипт"""
         # Очистка лога
@@ -380,6 +428,42 @@ class DashboardGUI:
             logs.write(f'{datetime.now()} - ERROR in {wrapper_file}: {str(e)}\n')
             logs.close()
 
+    def _run_wb_downloader(self) -> bool:
+        """Выгрузка данных (WB Analytics + WB Ad Report). Возвращает True/False."""
+        self.log_message("▶️ Запуск: download_ozon_analytics_report()")
+        self.log_message(f"📂 Downloads Folder: {self.downloads_folder_var.get()}")
+        self.log_message("─" * 60)
+
+        ok1 = False
+        ok2 = False
+        
+        try:
+            if self.wrapper_choice.get() == "wrapper":
+                ok1 = download_wb_report_v2(output_dir=self.downloads_folder_var.get())
+            elif self.wrapper_choice.get() == "wrapper_monday":
+                ok11 = download_wb_report_v2(target_date=date.today() - timedelta(days=1+2), output_dir=self.downloads_folder_var.get())
+                ok12 = download_wb_report_v2(target_date=date.today() - timedelta(days=2+2), output_dir=self.downloads_folder_var.get())
+                ok13 = download_wb_report_v2(target_date=date.today() - timedelta(days=3+2), output_dir=self.downloads_folder_var.get())
+                ok1 = ok11 and ok12 and ok13
+            else:
+                raise ValueError("Неверный выбор wrapper")
+        except Exception as e:
+            self.log_message(f"❌ ОШИБКА WB Analytics: {str(e)}")
+            messagebox.showerror("Ошибка выполнения", str(e))
+        try:
+            ok2 = download_wb_campaign_report(output_dir=self.downloads_folder_var.get()) # Campaing report - always today file, and only one
+        except Exception as e:
+            self.log_message(f"❌ ОШИБКА WB Campaign Report: {str(e)}")
+            messagebox.showerror("Ошибка выполнения", str(e))
+
+
+        if ok1 and ok2 and not self.do_preprocess_var.get():
+            self.log_message("✅ WB Analytics и WB Campaign Report: успешно")
+            messagebox.showinfo("Успех", "WB Analytics и WB Campaign Report успешно скачаны.")
+            return True
+        else:
+            self.log_message("❌ Выгрузка данных завершилась с ошибкой (см. лог).")
+            return False
 
 def main():
     root = tk.Tk()

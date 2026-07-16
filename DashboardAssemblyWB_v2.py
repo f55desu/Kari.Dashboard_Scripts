@@ -1499,8 +1499,8 @@ def assemble():
         'Остаток Агрегатора':           'Остаток товара на складе агрегатора',
         'Дистрибуция':                  'Дистрибуция размеров',
 
-        # Воронка с показами (DWH)
-        # [drop-DWH-metrics] больше не приходят в df (отбрасываются на шаге 15)
+        # Воронка с показами (DWH) — [drop-DWH-metrics] эти столбцы больше не приходят в df,
+        # они отбрасываются при чтении файлов "Воронка с показами ВБ" (см. шаг 15).
         # 'Показы из выгрузки':           'Количество показов по выгрузке',
         # 'Клики из выгрузки':            'Количество кликов по выгрузке',
         # 'Корзины из выгрузки':          'Добавлений в корзину по выгрузке',
@@ -1552,8 +1552,8 @@ def assemble():
 
     # 23 [v2]. Сохранить df_alloc в ТЕСТОВЫЙ csv (не перетирая боевой)
     table = pa.Table.from_pandas(df_alloc)
-    csv.write_csv(table, os.path.join(FOLDER_PATH, "ДБсПризнаками.csv"))
-    print(f"[v2] Сохранён тестовый CSV: {os.path.join(FOLDER_PATH, 'ДБсПризнаками.csv')}")
+    csv.write_csv(table, os.path.join(FOLDER_PATH, "ДБсПризнаками_Test.csv"))
+    print(f"[v2] Сохранён тестовый CSV: {os.path.join(FOLDER_PATH, 'Тест_ДБсПризнаками.csv')}")
 
     # 24. Обновляем и сохраняем Excel-файл
     # Функция для обновления Excel-файла с циклом попыток
@@ -1619,46 +1619,46 @@ def assemble():
         start_time = time.time()  # Запускаем таймер
 
         # Путь к исходному файлу
-        file_path_shows_expenses = os.path.join(FOLDER_PATH_FOR_DB, "Показы и затраты ВБ_2.0.xlsx")
+        file_path_shows_expenses = os.path.join(FOLDER_PATH_FOR_DB, "Показы и затраты ВБ_2.0_Test.xlsx")
 
         if os.path.exists(file_path_shows_expenses):
             # Создаем новое имя файла с текущей датой без года
             current_month_day = time.strftime("%d.%m")  # Текущая дата в формате ДД.ММ
-            new_file_name = f"Показы и затраты ВБ_2.0 {current_month_day}.xlsx"
+            new_file_name = f"Показы и затраты ВБ_2.0 {current_month_day}_Test.xlsx"
             new_file_path = os.path.join(FOLDER_PATH_FEATURES, new_file_name)
 
             # Путь для сохранения в дополнительную папку FOLDER_PATH_DUDL
-            dudl_file_path = os.path.join(FOLDER_PATH_DUDL, new_file_name)
+            # dudl_file_path = os.path.join(FOLDER_PATH_DUDL, new_file_name)
 
             # Удаляем старые файлы из FOLDER_PATH_DUDL
-            try:
-                if os.path.exists(FOLDER_PATH_DUDL):
-                    for filename in os.listdir(FOLDER_PATH_DUDL):
-                        # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
-                        match = re.match(r"Показы и затраты ВБ_2\.0 (\d{2}\.\d{2})\.xlsx", filename)
-                        if match:
-                            file_date = match.group(1)  # Извлекаем дату из имени файла
-                            if file_date != current_month_day:  # Сравниваем с текущей датой
-                                file_to_delete = os.path.join(FOLDER_PATH_DUDL, filename)
-                                os.remove(file_to_delete)
-                                print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_DUDL}'.")
-            except Exception as delete_error:
-                print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_DUDL}': {delete_error}")
+            # try:
+            #     if os.path.exists(FOLDER_PATH_DUDL):
+            #         for filename in os.listdir(FOLDER_PATH_DUDL):
+            #             # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
+            #             match = re.match(r"Показы и затраты ВБ_2\.0 (\d{2}\.\d{2})\_Test.xlsx", filename)
+            #             if match:
+            #                 file_date = match.group(1)  # Извлекаем дату из имени файла
+            #                 if file_date != current_month_day:  # Сравниваем с текущей датой
+            #                     file_to_delete = os.path.join(FOLDER_PATH_DUDL, filename)
+            #                     os.remove(file_to_delete)
+            #                     print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_DUDL}'.")
+            # except Exception as delete_error:
+            #     print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_DUDL}': {delete_error}")
 
             # Удаляем старые файлы из FOLDER_PATH_FEATURES
-            try:
-                if os.path.exists(FOLDER_PATH_FEATURES):
-                    for filename in os.listdir(FOLDER_PATH_FEATURES):
-                        # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
-                        match = re.match(r"Показы и затраты ВБ_2\.0 (\d{2}\.\d{2})\.xlsx", filename)
-                        if match:
-                            file_date = match.group(1)  # Извлекаем дату из имени файла
-                            if file_date != current_month_day:  # Сравниваем с текущей датой
-                                file_to_delete = os.path.join(FOLDER_PATH_FEATURES, filename)
-                                os.remove(file_to_delete)
-                                print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_FEATURES}'.")
-            except Exception as delete_error:
-                print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_FEATURES}': {delete_error}")
+            # try:
+            #     if os.path.exists(FOLDER_PATH_FEATURES):
+            #         for filename in os.listdir(FOLDER_PATH_FEATURES):
+            #             # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
+            #             match = re.match(r"Показы и затраты ВБ_2\.0 (\d{2}\.\d{2})\_Test.xlsx", filename)
+            #             if match:
+            #                 file_date = match.group(1)  # Извлекаем дату из имени файла
+            #                 if file_date != current_month_day:  # Сравниваем с текущей датой
+            #                     file_to_delete = os.path.join(FOLDER_PATH_FEATURES, filename)
+            #                     os.remove(file_to_delete)
+            #                     print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_FEATURES}'.")
+            # except Exception as delete_error:
+            #     print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_FEATURES}': {delete_error}")
 
             # Пытаемся обновить и сохранить файл
             success = update_and_save_excel(file_path_shows_expenses, new_file_path)
@@ -1673,12 +1673,12 @@ def assemble():
                 print("Файл успешно обновлен после повторной попытки.")
 
             # После успешного обновления копируем файл в папку FOLDER_PATH_DUDL
-            if success:
-                try:
-                    shutil.copy(new_file_path, dudl_file_path)
-                    print(f"Файл успешно скопирован в папку '{FOLDER_PATH_DUDL}'.")
-                except Exception as copy_error:
-                    print(f"Ошибка при копировании файла в папку '{FOLDER_PATH_DUDL}': {copy_error}")
+            # if success:
+            #     try:
+            #         shutil.copy(new_file_path, dudl_file_path)
+            #         print(f"Файл успешно скопирован в папку '{FOLDER_PATH_DUDL}'.")
+            #     except Exception as copy_error:
+            #         print(f"Ошибка при копировании файла в папку '{FOLDER_PATH_DUDL}': {copy_error}")
 
             elapsed_time = time.time() - start_time  # Вычисляем затраченное время
             print(f"Файл успешно обновлен и сохранен. Время выполнения: {format_elapsed_time(elapsed_time)}")

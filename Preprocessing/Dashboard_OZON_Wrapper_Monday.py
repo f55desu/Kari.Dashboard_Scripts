@@ -55,6 +55,90 @@ def get_latest_file_by_pattern(folder, pattern):
     files.sort(key=lambda f: os.path.getmtime(os.path.join(folder, f)), reverse=True)
     return files[0], files[1], files[2]
 
+def _apply_xlsx_inplace_edits(src):
+    """[new] Правит файл 'Аналитика продвижения_{Дата}.xlsx' in-place через openpyxl.
+
+    Лист 'Statistics' (как раньше):
+        - удалить столбцы 'Название товара', 'Место размещения'
+        - переименовать 'Инструмент' -> 'Тип продвижения'
+        - переименовать 'Средняя стоимость клика, ₽' -> 'Стоимость клика, ₽'
+        - заменить '-' на 0.0 в данных
+    Лист 'Union' (новое):
+        - переименовать 'Продажи в продвижении, ₽' -> 'Продажи, ₽'
+        - переименовать 'Продано товаров, шт'      -> 'Заказы, шт'
+
+    Заголовки находятся на 2-й строке (1-я — служебная "Период ..."), поэтому
+    HEADER_ROW = 2 в нумерации openpyxl.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(src)
+    HEADER_ROW = 2
+
+    def _headers(ws):
+        return [c.value for c in ws[HEADER_ROW]]
+
+    # ----- Statistics -----
+    if "Statistics" in wb.sheetnames:
+        ws = wb["Statistics"]
+
+        # удаление столбцов (после каждого delete_cols индексы сдвигаются → перечитываем headers)
+        for col_to_drop in ("Название товара", "Место размещения"):
+            headers = _headers(ws)
+            if col_to_drop in headers:
+                idx = headers.index(col_to_drop) + 1  # 1-based
+                ws.delete_cols(idx)
+                print(f"  ✅ [Statistics] удалён столбец '{col_to_drop}'")
+            else:
+                print(f"  ⚠️ [Statistics] столбец '{col_to_drop}' не найден")
+
+        # переименования
+        rename_map = {
+            "Средняя стоимость клика, ₽": "Стоимость клика, ₽",
+        }
+        for old, new in rename_map.items():
+            headers = _headers(ws)
+            if old in headers:
+                idx = headers.index(old) + 1
+                ws.cell(row=HEADER_ROW, column=idx, value=new)
+                print(f"  ✅ [Statistics] '{old}' → '{new}'")
+            else:
+                print(f"  ⚠️ [Statistics] столбец '{old}' не найден")
+
+        # замена '-' на 0.0 в данных
+        replaced = 0
+        for row in ws.iter_rows(min_row=HEADER_ROW + 1, values_only=False):
+            for cell in row:
+                if cell.value == '-':
+                    cell.value = 0.0
+                    replaced += 1
+        if replaced:
+            print(f"  ✅ [Statistics] заменено '-' → 0.0 в {replaced} ячейках")
+    else:
+        print("  ⚠️ Лист 'Statistics' не найден в файле")
+
+    # ----- Union -----
+    if "Union" in wb.sheetnames:
+        ws = wb["Union"]
+        rename_map = {
+            "Продажи в продвижении, ₽": "Продажи, ₽",
+            "Продано товаров, шт":      "Заказы, шт",
+        }
+        for old, new in rename_map.items():
+            headers = _headers(ws)
+            if old in headers:
+                idx = headers.index(old) + 1
+                ws.cell(row=HEADER_ROW, column=idx, value=new)
+                print(f"  ✅ [Union] '{old}' → '{new}'")
+            else:
+                print(f"  ⚠️ [Union] столбец '{old}' не найден")
+    else:
+        print("  ⚠️ Лист 'Union' не найден в файле")
+
+    wb.save(src)
+    print(f"💾 Правки сохранены в '{src}'")
+
+
 def copy_and_convert_sku_statistics(downloads_path, filename):
     import os, re, shutil
     from datetime import datetime
@@ -62,24 +146,14 @@ def copy_and_convert_sku_statistics(downloads_path, filename):
 
     src = os.path.join(downloads_path, filename)
 
-    # 📥 Загружаем Excel. Заголовок — со второй строки (header=1), как у тебя.
-    df = pd.read_excel(src, header=1)
+    # 🔧 [new] Сначала правим САМ xlsx (листы Statistics + Union) — изменения должны
+    # сохраниться в исходный файл "Аналитика продвижения_{Дата}.xlsx".
+    print(f"🔧 Применяем правки к xlsx in-place: {filename}")
+    _apply_xlsx_inplace_edits(src)
 
-    # Удаляем столбец "Название товара в продвижении", если есть
-    column_name = "Название товара"
-    if column_name in df.columns:
-        df.drop(column_name, axis=1, inplace=True)
-        print(f"✅ Столбец '{column_name}' был удалён.")
-    else:
-        print(f"⚠️ Столбец '{column_name}' не найден.")
-
-    column_name = "Место размещения"
-    if column_name in df.columns:
-        df.drop(column_name, axis=1, inplace=True)
-        print(f"✅ Столбец '{column_name}' был удалён.")
-    else:
-        print(f"⚠️ Столбец '{column_name}' не найден.")
-
+    # 📥 Загружаем уже модифицированный Statistics для CSV.
+    # header=1 — заголовок на 2-й строке (1-я — служебная строка "Период ...").
+    df = pd.read_excel(src, sheet_name="Statistics", header=1)
     column_name = "Инструмент"
     target_column_name = "Тип продвижения"
     if column_name in df.columns:
@@ -87,12 +161,13 @@ def copy_and_convert_sku_statistics(downloads_path, filename):
         print(f"✅ Столбец '{column_name}' был изменен на '{target_column_name}'.")
     else:
         print(f"⚠️ Столбец '{column_name}' не найден.")
-    df.replace('-', 0.0, inplace=True)
-    df['CTR, %'] = pd.to_numeric(df['CTR, %'])
-    df['Конверсия в корзину, %'] = pd.to_numeric(df['Конверсия в корзину, %'])
-    df['Затраты на заказ, ₽'] = pd.to_numeric(df['Затраты на заказ, ₽'])
-    df['Стоимость клика, ₽'] = pd.to_numeric(df['Стоимость клика, ₽'])
-    
+    # Приведение типов — данные после _apply_xlsx_inplace_edits уже без '-' и с
+    # правильными именами столбцов.
+    df['CTR, %']                  = pd.to_numeric(df['CTR, %'], errors='coerce')
+    df['Конверсия в корзину, %']  = pd.to_numeric(df['Конверсия в корзину, %'], errors='coerce')
+    df['Затраты на заказ, ₽']     = pd.to_numeric(df['Затраты на заказ, ₽'], errors='coerce')
+    df['Стоимость клика, ₽']      = pd.to_numeric(df['Стоимость клика, ₽'], errors='coerce')
+
     # Извлекаем дату из имени файла
     match = re.search(r"Аналитика продвижения_(\d{2}\.\d{2}\.\d{4})\.xlsx", filename)
     if not match:
@@ -132,12 +207,22 @@ def copy_and_convert_sku_statistics(downloads_path, filename):
 
     print(f"✅ CSV сохранён: {csv_filename}")
 
-    # Копируем куда нужно
-    dst_csv = os.path.join(folder_затраты_Озон, csv_filename)
-    dst_xlsx = os.path.join(folder_затраты_Озон_NewFormat, filename)
+    # Копируем куда нужно:
+    #   1) CSV → "Затраты из Аналитики"
+    #   2) Изменённый xlsx → "Затраты из Аналитики New Format"
+    #   3) [new] Изменённый xlsx → "Затраты из Аналитики" (та же папка, что и CSV)
+    dst_csv          = os.path.join(folder_затраты_Озон,            csv_filename)
+    dst_xlsx_newfmt  = os.path.join(folder_затраты_Озон_NewFormat,  filename)
+    dst_xlsx_old     = os.path.join(folder_затраты_Озон,            filename)
+
     shutil.copy2(csv_path, dst_csv)
-    shutil.copy2(src, dst_xlsx)
-    print(f"✅ Копирован CSV файл статистики: {csv_filename}")
+    print(f"✅ CSV скопирован → 'Затраты из Аналитики': {csv_filename}")
+
+    shutil.copy2(src, dst_xlsx_newfmt)
+    print(f"✅ Изменённый xlsx скопирован → 'Затраты из Аналитики New Format': {filename}")
+
+    shutil.copy2(src, dst_xlsx_old)
+    print(f"✅ Изменённый xlsx скопирован → 'Затраты из Аналитики': {filename}")
 
     return os.path.join(folder_затраты_Озон, csv_filename)
 
