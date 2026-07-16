@@ -62,28 +62,43 @@ def extract_latest_vb_file():
     return os.path.join(folder_wb, new_name)
 
 def unify_columns(filepath, ethalon=os.path.join(downloads_folder, 'Воронка ВБ Эталон.xlsx'), sheet_name='Товары', header_row=2):
+    """Приводит файл к структуре эталона:
+       - удаляет столбцы, которых нет в эталоне;
+       - ДОБАВЛЯЕТ отсутствующие столбцы из эталона как пустые (с тем же порядком, что в эталоне),
+         чтобы Power Query не «ломался» при пропавших колонках (см. 07.05.2026 — ВБ убрал
+         «Остатки склад ВБ, шт» и «Остатки МП, шт»);
+       - заменяет точку на запятую в числовых строках."""
     # Чтение эталонного файла
     ethalon_df = pd.read_excel(ethalon, sheet_name=sheet_name, header=1)
-    
+    ethalon_headers = ethalon_df.columns.tolist()
+
     # Открытие файла воронки через openpyxl
     wb = load_workbook(filename=filepath)
     ws = wb[sheet_name]
 
     # Получаем заголовки воронки
     headers = [cell.value for cell in ws[header_row]]
-    
-    # Получаем заголовки эталонного файла
-    ethalon_headers = ethalon_df.columns.tolist()
 
-    # Определяем столбцы для удаления (столбцы воронки, которых нет в эталоне)
+    # 1) Удаляем столбцы, которых нет в эталоне
     columns_to_delete = [header for header in headers if header not in ethalon_headers]
-
-    # Удаляем столбцы в файле воронки, которых нет в эталоне
     for col in reversed(columns_to_delete):
         col_index = headers.index(col) + 1  # openpyxl использует 1-based индексацию
         ws.delete_cols(col_index)
+    # перечитываем заголовки после удаления
+    headers = [cell.value for cell in ws[header_row]]
 
-    # Замена "." на "," в числовых колонках
+    # 2) ДОБАВЛЯЕМ отсутствующие столбцы из эталона
+    #    Идём по эталону по порядку: если столбца нет — вставляем пустой на ту же позицию,
+    #    чтобы итоговый порядок столбцов совпадал с эталоном.
+    for target_idx, eth_col in enumerate(ethalon_headers, start=1):
+        if eth_col not in headers:
+            ws.insert_cols(target_idx)
+            ws.cell(row=header_row, column=target_idx, value=eth_col)
+            # обновляем локальный список заголовков
+            headers.insert(target_idx - 1, eth_col)
+            print(f"  ➕ Добавлен отсутствующий столбец '{eth_col}' (позиция {target_idx})")
+
+    # 3) Замена "." на "," в числовых колонках
     for row in ws.iter_rows(min_row=header_row + 1):  # начинаем со строки после заголовков
         for cell in row:
             val = cell.value
@@ -98,7 +113,8 @@ def unify_columns(filepath, ethalon=os.path.join(downloads_folder, 'Воронк
 
     # Сохраняем изменения
     wb.save(filepath)
-    print(f"✅ Столбцы, не содержащиеся в эталонном файле, были удалены в файле: {filepath}")
+    print(f"✅ Столбцы унифицированы (удалено лишних: {len(columns_to_delete)}, "
+          f"итоговый порядок ↔ эталон): {filepath}")
 
 def delete_columns_by_header(filepath, sheet_name="Товары", target_headers=None, header_row=2):
     if target_headers is None:
