@@ -302,8 +302,8 @@ def main():
     voronka_wb = extract_latest_vb_file() # 1
     unify_columns(voronka_wb)
     copy_latest_cost_history() # 2
-    update_latest_week_file()
-    update_zatraty_wb2()
+    # update_latest_week_file()
+    # update_zatraty_wb2()
 
     # Запускаем скрипт
     # subprocess.run(['DB_WB_1.1.exe'], check=True)

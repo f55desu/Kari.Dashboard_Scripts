@@ -110,48 +110,13 @@ def assemble():
         "В корзину из поиска": "В корзину из поиска или каталога",
     }, inplace=True, errors="ignore")
 
-    # Колонка "Артикул" критична: без неё groupby не сворачивает размеры
-    # одного товара → показы раздуваются в ~4x.
-    # Проверяем: если Артикул отсутствует, пуст или содержит только цифры
-    # (= Ozon ID вместо настоящего артикула) → строим маппинг из Excel.
-    _need_artikul_map = False
-    if "Артикул" not in df_voronka.columns:
-        _need_artikul_map = True
-    else:
-        _sample = df_voronka["Артикул"].dropna().astype(str).head(100)
-        _has_letters = _sample.str.contains(r'[A-Za-zА-Яа-я]', regex=True).any()
-        if not _has_letters:
-            _need_artikul_map = True
-            print("⚠ Колонка 'Артикул' содержит только цифры (= Ozon ID)")
-
-    if _need_artikul_map and "Ozon ID" in df_voronka.columns:
-        print("Строим маппинг Ozon ID → Артикул из Excel-файлов воронки...")
-        _oz_funnel_dir = os.path.normpath(os.path.join(
-            FOLDER_PATH, "ВЫГРУЗКА воронка Озон"))
-        _excel_files = sorted(glob(os.path.join(_oz_funnel_dir, "analytics_report_*.xlsx")))[-5:]
-        _map_parts = []
-        for _ef in _excel_files:
-            try:
-                _mdf = pd.read_excel(_ef, engine="calamine", usecols=["Ozon ID", "Артикул"])
-                _map_parts.append(_mdf.drop_duplicates(subset=["Ozon ID"]))
-            except Exception:
-                pass
-        if _map_parts:
-            _mapping_df = pd.concat(_map_parts, ignore_index=True).drop_duplicates(subset=["Ozon ID"])
-            _mapping = _mapping_df.set_index(
-                _mapping_df["Ozon ID"].astype(str).str.strip()
-            )["Артикул"]
-            df_voronka["Артикул"] = (
-                df_voronka["Ozon ID"].astype(str).str.strip().map(_mapping)
-            )
-            _mapped = df_voronka["Артикул"].notna().sum()
-            _total = len(df_voronka)
-            print(f"✓ Маппинг: {_mapped}/{_total} строк ({100*_mapped/_total:.1f}%)")
-            df_voronka["Артикул"] = df_voronka["Артикул"].fillna(
-                df_voronka["Ozon ID"].astype(str))
-        else:
-            print("⚠ Нет Excel-файлов для маппинга — используется Ozon ID")
-            df_voronka["Артикул"] = df_voronka["Ozon ID"].astype(str)
+    # PG содержит колонку "Артикул" (внутренний код, напр. W3152014-37),
+    # добавленную при экспорте из MSSQL в funnel_sql_exporter.
+    # Фоллбэк на Ozon ID, если PG ещё не перезалит.
+    if "Артикул" not in df_voronka.columns and "Ozon ID" in df_voronka.columns:
+        print("⚠ В PG нет колонки 'Артикул' — используется Ozon ID. "
+              "Перезалейте PG: python funnel_sql_exporter.py --oz --recent")
+        df_voronka["Артикул"] = df_voronka["Ozon ID"].astype(str)
 
     df_voronka["Дата"] = df_voronka["Дата"].dt.strftime("%Y-%m-%d")
 
@@ -177,88 +142,11 @@ def assemble():
     df_voronka["Выкупили ШТ"] = df_voronka["Заказано товаров"] - df_voronka["Отменено товаров"] - df_voronka["Возвращено товаров"]
     df_voronka["Артикул"] = df_voronka["Артикул"].astype(str).str.split("-").str[0]
 
-    # ─── РАННИЙ ДЖОЙН ЗАТРАТ (до groupby, пока все Ozon ID на месте) ───
-    # В PG воронка хранится по Ozon ID (~209K/день), а после groupby по
-    # Артикул-prefix (~54K/день) выживает только 1 Ozon ID из ~4 (first).
-    # Если джойнить затраты ПОСЛЕ groupby — 3/4 затрат теряются.
-    # Решение: джойним затраты к воронке ДО groupby на уровне Ozon ID,
-    # чтобы при группировке затраты суммировались вместе с показами.
-    print("\n── Ранний джойн затрат к воронке (до groupby) ──")
-
-    _df_costs = pd.read_sql(
-        f'''SELECT * FROM work.ozon_costs_statistics WHERE "Дата" >= '{cutoff}' ''',
-        pg_engine
-    )
-    _df_costs["Дата"] = pd.to_datetime(_df_costs["Дата"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-    _df_costs.rename(columns={
-        "Расход руб.": "Расход, ₽",
-        "Продажи в продвижении руб.": "Продажи, ₽",
-        "Продано товаров шт": "Заказы, шт",
-        "CTR %": "CTR, %",
-        "Показы": "Рекламные показы",
-        "Клики": "Рекламные клики",
-    }, inplace=True, errors="ignore")
-
-    _cost_metrics = ["Расход, ₽", "Продажи, ₽", "Заказы, шт",
-                     "Рекламные показы", "Рекламные клики"]
-    _cost_metrics = [c for c in _cost_metrics if c in _df_costs.columns]
-    for c in _cost_metrics:
-        _df_costs[c] = pd.to_numeric(
-            _df_costs[c].astype(str)
-            .str.replace(' ', '', regex=False)
-            .str.replace(' ', '', regex=False)
-            .str.replace('₽', '', regex=False)
-            .str.replace(',', '.', regex=False),
-            errors='coerce'
-        )
-
-    # Нормализуем ключ SKU (= Ozon ID) в затратах
-    _df_costs["SKU"] = (
-        _df_costs["SKU"].astype(str).str.strip().str.upper()
-        .str.replace(r'\.0$', '', regex=True)
-    )
-
-    # Агрегируем затраты по (Дата, SKU) — убираем дубли по кампаниям
-    _costs_agg = (
-        _df_costs
-        .groupby(["Дата", "SKU"], as_index=False)[_cost_metrics]
-        .sum(min_count=1)
-    )
-
-    # Нормализуем Ozon ID в воронке для джойна
-    df_voronka["Ozon ID"] = (
-        df_voronka["Ozon ID"].astype(str).str.strip().str.upper()
-        .str.replace(r'\.0$', '', regex=True)
-    )
-
-    _before_costs = _costs_agg["Расход, ₽"].sum() if "Расход, ₽" in _costs_agg.columns else 0
-    print(f"  Затраты до джойна: {_before_costs:,.2f} ₽ ({len(_costs_agg):,} строк)")
-
-    # LEFT join: воронка (по Ozon ID) ← затраты (по SKU = Ozon ID)
-    df_voronka = df_voronka.merge(
-        _costs_agg.rename(columns={"SKU": "Ozon ID"}),
-        on=["Дата", "Ozon ID"],
-        how="left",
-    )
-    # Заполняем NaN нулями в метриках затрат
-    for c in _cost_metrics:
-        if c in df_voronka.columns:
-            df_voronka[c] = df_voronka[c].fillna(0)
-
-    _after_costs = df_voronka["Расход, ₽"].sum() if "Расход, ₽" in df_voronka.columns else 0
-    _matched = (df_voronka["Расход, ₽"] > 0).sum() if "Расход, ₽" in df_voronka.columns else 0
-    print(f"  Затраты после джойна: {_after_costs:,.2f} ₽ ({_matched:,} строк с расходом)")
-    print(f"  Потеря: {_before_costs - _after_costs:,.2f} ₽")
-
-    del _df_costs, _costs_agg
-    # ─── КОНЕЦ РАННЕГО ДЖОЙНА ──────────────────────────────────────────
-
     sum_cols_all = [
         "Показы, всего",
         "Показы на карточке товара",
         "Показы в поиске и каталоге",
-        "Позиция в поиске и каталоге",
+        "Позиция в поиске и каталоге",          # суммируем, как в вашем примере
         "В корзину, всего",
         "Заказано товаров",
         "Отменено товаров",
@@ -266,48 +154,35 @@ def assemble():
         "Возвращено товаров",
         "Заказано на сумму",
         "В корзину из карточки товара",
-        "В корзину из поиска или каталога",
-        "Выкупили ШТ",
-        "Расход, ₽",
-        "Продажи, ₽",
-        "Заказы, шт",
-        "Рекламные показы",
-        "Рекламные клики",
+        "В корзину из поиска или каталога",     # если есть в выгрузке
+        "Выкупили ШТ"
     ]
     sum_cols = [c for c in sum_cols_all if c in df_voronka.columns]
     df_voronka.rename(columns={
                             "Артикул": "Артикул",
                             "Продажи, ₽": "Рекламные заказано на сумму",
-                            "Рекламные показы": "Рекламные показы",
-                            "Рекламные клики": "Рекламные показы на карточке товара",
+                            "Показы": "Рекламные показы",
+                            "Клики": "Рекламные показы на карточке товара",
                             "Заказы, шт": "Рекламные заказано товаров"
                         }, inplace=True, errors="ignore")
-    # Обновим sum_cols после переименований
-    sum_cols = [c for c in sum_cols_all if c in df_voronka.columns]
-    # Добавим переименованные колонки
-    for c in ["Рекламные заказано на сумму", "Рекламные показы на карточке товара",
-              "Рекламные заказано товаров", "Расход, ₽"]:
-        if c in df_voronka.columns and c not in sum_cols:
-            sum_cols.append(c)
-
+    # 2) безопасно приводим эти метрики к числам (NaN -> 0 перед суммированием)
     for c in sum_cols:
         df_voronka[c] = pd.to_numeric(df_voronka[c], errors="coerce").fillna(0)
 
-    # нечисловые поля
+    # 3) нечисловые поля, которые логично брать первыми в группе
     first_cols_all = ["Тип товара", "Товары", "Модель", "Ozon ID"]
     first_cols = [c for c in first_cols_all if c in df_voronka.columns]
 
+    # 4) готовим словарь агрегаций
     agg_dict = {c: "sum" for c in sum_cols}
     agg_dict.update({c: "first" for c in first_cols})
 
-    # groupby теперь суммирует И воронку, И затраты
+    # 5) группируем и получаем одну строку на (Дата, Артикул)
     df_voronka = (
         df_voronka
         .groupby(["Дата", "Артикул"], as_index=False)
         .agg(agg_dict)
     )
-    print(f"  После groupby: {len(df_voronka):,} строк, "
-          f"Расход = {df_voronka['Расход, ₽'].sum():,.2f} ₽" if "Расход, ₽" in df_voronka.columns else "")
 
 
     # 2. Получить данные из файла "Справочник.xlsx"
@@ -865,84 +740,163 @@ def assemble():
         df_zatraty_enriched.loc[mask_organic, 'ТипАктивности'] = 'Органика'
 
 
-    # ─── ПРИСОЕДИНЕНИЕ ТипАктивности (без повторного мержа сумм затрат) ───
-    # Суммы затрат (Расход, ₽ и пр.) уже присоединены ранним джойном
-    # до groupby. Здесь добавляем ТОЛЬКО классификацию ТипАктивности.
     print("=" * 80)
-    print("ПРИСОЕДИНЕНИЕ ТипАктивности (суммы затрат уже в воронке)")
+    print("ПРАВИЛЬНЫЙ МЕРЖ БЕЗ ЛИШНЕГО МАППИНГА")
     print("=" * 80)
 
-    df_funnel_final = df_voronka.copy()
+    # ===== ШАГ 1: Подготовка воронки =====
+    print("\nШАГ 1: Подготовка воронки")
+    print("-" * 80)
 
-    # Нормализуем Ozon ID в воронке
-    if 'Ozon ID' in df_funnel_final.columns:
-        df_funnel_final['Артикул OZ'] = (
-            df_funnel_final['Ozon ID']
-            .astype(str).str.strip().str.upper()
-            .str.replace(r'\.0$', '', regex=True)
-        )
-    else:
-        df_funnel_final['Артикул OZ'] = df_funnel_final['Артикул'].astype(str)
+    df_voronka_clean = df_voronka.copy()
 
-    # Из df_zatraty_enriched берём ТОЛЬКО ТипАктивности (без сумм!)
-    _type_map = df_zatraty_enriched[['Артикул OZ', 'Дата', 'ТипАктивности']].copy()
-    _type_map['Артикул OZ'] = (
-        _type_map['Артикул OZ']
-        .astype(str).str.strip().str.upper()
+    # Убедимся, что Ozon ID есть
+    if 'Ozon ID' not in df_voronka_clean.columns:
+        raise ValueError("❌ В воронке нет колонки 'Ozon ID'!")
+
+    # Нормализуем Ozon ID - приводим к строке и убираем лишнее
+    df_voronka_clean['Ozon ID'] = (
+        df_voronka_clean['Ozon ID']
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .str.replace(r'\.0$', '', regex=True)  # убираем .0 если есть
+    )
+
+    print(f"✓ Размер воронки: {len(df_voronka_clean):,} строк")
+    print(f"✓ Заполненность Ozon ID: {df_voronka_clean['Ozon ID'].notna().sum():,} ({100*df_voronka_clean['Ozon ID'].notna().sum()/len(df_voronka_clean):.1f}%)")
+    print(f"✓ Примеры Ozon ID: {df_voronka_clean['Ozon ID'].head(5).tolist()}")
+
+    # ===== ШАГ 2: Подготовка затрат =====
+    print("\nШАГ 2: Подготовка затрат")
+    print("-" * 80)
+
+    df_zatraty_clean = df_zatraty_enriched.copy()
+
+    # Нормализуем Артикул OZ
+    df_zatraty_clean['Артикул OZ'] = (
+        df_zatraty_clean['Артикул OZ']
+        .astype(str)
+        .str.strip()
+        .str.upper()
         .str.replace(r'\.0$', '', regex=True)
     )
-    _type_map['Дата'] = norm_date(_type_map['Дата'])
-    _type_map = _type_map.dropna(subset=['ТипАктивности'])
-    _type_map = _type_map.drop_duplicates(subset=['Дата', 'Артикул OZ'], keep='first')
 
-    df_funnel_final['Дата'] = norm_date(df_funnel_final['Дата'])
+    print(f"✓ Размер затрат: {len(df_zatraty_clean):,} строк")
+    print(f"✓ Уникальных Артикул OZ: {df_zatraty_clean['Артикул OZ'].nunique():,}")
+    print(f"✓ Примеры Артикул OZ: {df_zatraty_clean['Артикул OZ'].head(5).tolist()}")
 
-    _before_len = len(df_funnel_final)
-    df_funnel_final = df_funnel_final.merge(
-        _type_map[['Дата', 'Артикул OZ', 'ТипАктивности']],
-        on=['Дата', 'Артикул OZ'],
-        how='left',
+    # ===== ШАГ 3: Проверка пересечения =====
+    print("\nШАГ 3: Проверка пересечения ключей")
+    print("-" * 80)
+
+    voronka_ids = set(df_voronka_clean['Ozon ID'].dropna())
+    zatraty_ids = set(df_zatraty_clean['Артикул OZ'].dropna())
+
+    intersection = voronka_ids & zatraty_ids
+
+    print(f"Уникальных ID в воронке: {len(voronka_ids):,}")
+    print(f"Уникальных ID в затратах: {len(zatraty_ids):,}")
+    print(f"Пересечение: {len(intersection):,} ({100*len(intersection)/len(voronka_ids) if voronka_ids else 0:.1f}% от воронки)")
+
+    if len(intersection) == 0:
+        print("\n⚠️ КРИТИЧЕСКАЯ ПРОБЛЕМА: НЕТ ПЕРЕСЕЧЕНИЙ!")
+        print("Возможные причины:")
+        print("  1. Разные периоды данных в воронке и затратах")
+        print("  2. Разные площадки (один файл WB, другой Ozon)")
+        print("  3. Проблема с ID - один Ozon ID, другой SKU")
+
+        print("\nПримеры ID из воронки:")
+        print(list(voronka_ids)[:10])
+        print("\nПримеры ID из затрат:")
+        print(list(zatraty_ids)[:10])
+
+        raise ValueError("Невозможно продолжить без пересечений!")
+
+    # ===== ШАГ 4: Мерж через функцию =====
+    print("\nШАГ 4: Финальный мерж")
+    print("-" * 80)
+
+    # Переименуем Ozon ID -> Артикул OZ для единообразия
+    df_voronka_clean = df_voronka_clean.rename(columns={'Ozon ID': 'Артикул OZ'})
+
+    df_prices_exists = 'df_prices' in globals()
+
+    df_funnel_final = merge_voronka_costs_preserve_impressions(
+        df_voronka=df_voronka_clean,
+        df_costs=df_zatraty_clean,
+        df_prices=df_prices,
+        preserve_cols=('Показы, всего',),
+        left_key_candidates=('Артикул OZ',),    # ← теперь одинаковое название!
+        right_key='Артикул OZ',                 # ← и тут тоже!
+        add_tail=False,
+        type_col_candidates=('ТипАктивности',)
     )
-    assert len(df_funnel_final) == _before_len, \
-        f"Мерж ТипАктивности раздул строки: {_before_len} -> {len(df_funnel_final)}"
 
-    _matched = df_funnel_final['ТипАктивности'].notna().sum()
-    print(f"  ТипАктивности присвоен {_matched:,} строкам из {_before_len:,}")
-    del _type_map
+    print("\n✅ Мерж завершён!")
 
-    # Мерж цен (m:1 по Дата, Артикул)
-    if 'df_prices' in dir() and not df_prices.empty:
-        df_prices['Артикул'] = df_prices['Артикул'].astype(str).str.strip()
-        df_prices['Дата'] = norm_date(df_prices['Дата'])
-        df_funnel_final = df_funnel_final.merge(
-            df_prices[['Дата', 'Артикул', 'Цена']].drop_duplicates(subset=['Дата', 'Артикул']),
-            on=['Дата', 'Артикул'],
-            how='left',
-        )
+    # ===== ШАГ 5: Заполняем органику =====
+    print("\nШАГ 5: Заполнение органического трафика")
+    print("-" * 80)
 
-    # Заполняем органику: нет типа + расход=0 + есть показы
-    spend_col = next((c for c in ['Расход, ₽', 'Расход, руб'] if c in df_funnel_final.columns), None)
+    spend_col = next((c for c in ['Расход, ₽','Расход, руб'] if c in df_funnel_final.columns), None)
     shows_col = next((c for c in ['Показы, всего', 'Показы'] if c in df_funnel_final.columns), None)
+
     if spend_col and shows_col:
+        # Нормализуем колонки
         df_funnel_final[spend_col] = pd.to_numeric(df_funnel_final[spend_col], errors='coerce').fillna(0)
         df_funnel_final[shows_col] = pd.to_numeric(df_funnel_final[shows_col], errors='coerce').fillna(0)
+
+        # Маска для органики: нет типа + расход=0 + есть показы
         mask_organic = (
             df_funnel_final['ТипАктивности'].isna() &
             (df_funnel_final[spend_col] == 0) &
             (df_funnel_final[shows_col] > 0)
         )
+
+        organic_count_before = mask_organic.sum()
         df_funnel_final.loc[mask_organic, 'ТипАктивности'] = 'Органика'
-        print(f"  Заполнено 'Органика' для {mask_organic.sum():,} строк")
 
-    # Финальная статистика
-    print(f"\n  Размер результата: {len(df_funnel_final):,} строк")
+        print(f"✓ Заполнено 'Органика' для {organic_count_before:,} строк")
+
+    # ===== ШАГ 6: Финальная статистика =====
+    print("\n" + "=" * 80)
+    print("ФИНАЛЬНАЯ СТАТИСТИКА")
+    print("=" * 80)
+
+    print(f"\nРазмер результата: {len(df_funnel_final):,} строк")
+
+    print("\nРаспределение ТипАктивности:")
+    type_counts = df_funnel_final['ТипАктивности'].value_counts(dropna=False)
+    print(type_counts)
+
+    nan_count = df_funnel_final['ТипАктивности'].isna().sum()
+    nan_pct = 100 * nan_count / len(df_funnel_final)
+    print(f"\nСтрок с NaN: {nan_count:,} ({nan_pct:.1f}%)")
+
+    if nan_pct < 20:
+        print("\n✅ УСПЕХ! Доля NaN < 20%")
+    elif nan_pct < 50:
+        print("\n⚠️ ЧАСТИЧНО РЕШЕНО: Доля NaN {:.1f}%".format(nan_pct))
+    else:
+        print("\n❌ ПРОБЛЕМА: Доля NaN всё ещё {:.1f}%".format(nan_pct))
+
+    # Проверка расходов
     if spend_col:
-        _total_spend = df_funnel_final[spend_col].sum()
-        print(f"  Итого расход: {_total_spend:,.2f} ₽")
-    print(f"  Распределение ТипАктивности:")
-    print(df_funnel_final['ТипАктивности'].value_counts(dropna=False))
+        total_spend = df_funnel_final[spend_col].sum()
+        original_spend = df_zatraty_clean[spend_col].sum()
+        print(f"\nСумма расходов:")
+        print(f"  - В затратах: {original_spend:,.2f} ₽")
+        print(f"  - В результате: {total_spend:,.2f} ₽")
+        print(f"  - Разница: {total_spend - original_spend:,.2f} ₽")
 
+    print("\n" + "=" * 80)
+    print("ГОТОВО! Результат в переменной df_funnel_final")
+    print("=" * 80)
+
+    # Сохраняем в df_funnel для удобства
     df_funnel = df_funnel_final
+    print("\n✓ Также сохранено в df_funnel")
 
     df_union_reference = pd.merge(df_reference[['Артикул', 'Артикул OZ']], df_all_union, on="Артикул OZ", how='right')
     # df_union_reference[df_union_reference['Артикул'].isna()]
@@ -1636,8 +1590,8 @@ def assemble():
 
     # 22 [v2]. Сохранить df_final_db_all_features в ТЕСТОВЫЙ csv (не перетирая боевой)
     table = pa.Table.from_pandas(df_final_db_all_features)
-    csv.write_csv(table, os.path.join(FOLDER_PATH, "ДБсПризнаками_Ozon.csv"))
-    print(f"[v2] Сохранён тестовый CSV: {os.path.join(FOLDER_PATH, 'ДБсПризнаками_Ozon.csv')}")
+    csv.write_csv(table, os.path.join(FOLDER_PATH, "ДБсПризнаками_Ozon_SQL.csv"))
+    print(f"[v2] Сохранён тестовый CSV: {os.path.join(FOLDER_PATH, 'ДБсПризнаками_Ozon_SQL.csv')}")
 
 
     # 22. Обновляем и сохраняем Excel-файл
@@ -1704,46 +1658,46 @@ def assemble():
         start_time = time.time()  # Запускаем таймер
 
         # Путь к исходному файлу
-        file_path_shows_expenses = os.path.join(FOLDER_PATH_FOR_DB, "Показы и затраты ОЗ_2.0.xlsx")
+        file_path_shows_expenses = os.path.join(FOLDER_PATH_FOR_DB, "Показы и затраты ОЗ_2.0_SQL.xlsx")
 
         if os.path.exists(file_path_shows_expenses):
             # Создаем новое имя файла с текущей датой без года
             current_month_day = time.strftime("%d.%m")  # Текущая дата в формате ДД.ММ
-            new_file_name = f"Показы и затраты ОЗ_2.0 {current_month_day}.xlsx"
+            new_file_name = f"Показы и затраты ОЗ_2.0 {current_month_day}_SQL.xlsx"
             new_file_path = os.path.join(FOLDER_PATH_FEATURES, new_file_name)
 
             # Путь для сохранения в дополнительную папку FOLDER_PATH_DUDL
             dudl_file_path = os.path.join(FOLDER_PATH_DUDL, new_file_name)
 
-            # Удаляем старые файлы из FOLDER_PATH_DUDL
-            try:
-                if os.path.exists(FOLDER_PATH_DUDL):
-                    for filename in os.listdir(FOLDER_PATH_DUDL):
-                        # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
-                        match = re.match(r"Показы и затраты ОЗ_2\.0 (\d{2}\.\d{2})\.xlsx", filename)
-                        if match:
-                            file_date = match.group(1)  # Извлекаем дату из имени файла
-                            if file_date != current_month_day:  # Сравниваем с текущей датой
-                                file_to_delete = os.path.join(FOLDER_PATH_DUDL, filename)
-                                os.remove(file_to_delete)
-                                print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_DUDL}'.")
-            except Exception as delete_error:
-                print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_DUDL}': {delete_error}")
+            # # Удаляем старые файлы из FOLDER_PATH_DUDL
+            # try:
+            #     if os.path.exists(FOLDER_PATH_DUDL):
+            #         for filename in os.listdir(FOLDER_PATH_DUDL):
+            #             # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
+            #             match = re.match(r"Показы и затраты ОЗ_2\.0 (\d{2}\.\d{2})\.xlsx", filename)
+            #             if match:
+            #                 file_date = match.group(1)  # Извлекаем дату из имени файла
+            #                 if file_date != current_month_day:  # Сравниваем с текущей датой
+            #                     file_to_delete = os.path.join(FOLDER_PATH_DUDL, filename)
+            #                     os.remove(file_to_delete)
+            #                     print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_DUDL}'.")
+            # except Exception as delete_error:
+            #     print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_DUDL}': {delete_error}")
 
-            # Удаляем старые файлы из FOLDER_PATH_FEATURES
-            try:
-                if os.path.exists(FOLDER_PATH_FEATURES):
-                    for filename in os.listdir(FOLDER_PATH_FEATURES):
-                        # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
-                        match = re.match(r"Показы и затраты ОЗ_2\.0 (\d{2}\.\d{2})\.xlsx", filename)
-                        if match:
-                            file_date = match.group(1)  # Извлекаем дату из имени файла
-                            if file_date != current_month_day:  # Сравниваем с текущей датой
-                                file_to_delete = os.path.join(FOLDER_PATH_FEATURES, filename)
-                                os.remove(file_to_delete)
-                                print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_FEATURES}'.")
-            except Exception as delete_error:
-                print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_FEATURES}': {delete_error}")
+            # # Удаляем старые файлы из FOLDER_PATH_FEATURES
+            # try:
+            #     if os.path.exists(FOLDER_PATH_FEATURES):
+            #         for filename in os.listdir(FOLDER_PATH_FEATURES):
+            #             # Ищем файлы с шаблоном "Показы и затраты ОЗ_2.0 DD.MM.xlsx"
+            #             match = re.match(r"Показы и затраты ОЗ_2\.0 (\d{2}\.\d{2})\.xlsx", filename)
+            #             if match:
+            #                 file_date = match.group(1)  # Извлекаем дату из имени файла
+            #                 if file_date != current_month_day:  # Сравниваем с текущей датой
+            #                     file_to_delete = os.path.join(FOLDER_PATH_FEATURES, filename)
+            #                     os.remove(file_to_delete)
+            #                     print(f"Файл '{filename}' удален из папки '{FOLDER_PATH_FEATURES}'.")
+            # except Exception as delete_error:
+            #     print(f"Ошибка при удалении старых файлов из папки '{FOLDER_PATH_FEATURES}': {delete_error}")
 
             # Пытаемся обновить и сохранить файл
             success = update_and_save_excel(file_path_shows_expenses, new_file_path)
@@ -1757,15 +1711,15 @@ def assemble():
 
                 print("Файл успешно обновлен после повторной попытки.")
 
-            # После успешного обновления копируем файл в папку FOLDER_PATH_DUDL
-            if success:
-                try:
-                    shutil.copy(new_file_path, dudl_file_path)
-                    print(f"Файл успешно скопирован в папку '{FOLDER_PATH_DUDL}'.")
-                except Exception as copy_error:
-                    print(f"Ошибка при копировании файла в папку '{FOLDER_PATH_DUDL}': {copy_error}")
+            # # После успешного обновления копируем файл в папку FOLDER_PATH_DUDL
+            # if success:
+            #     try:
+            #         shutil.copy(new_file_path, dudl_file_path)
+            #         print(f"Файл успешно скопирован в папку '{FOLDER_PATH_DUDL}'.")
+            #     except Exception as copy_error:
+            #         print(f"Ошибка при копировании файла в папку '{FOLDER_PATH_DUDL}': {copy_error}")
 
-            elapsed_time = time.time() - start_time  # Вычисляем затраченное время
+            # elapsed_time = time.time() - start_time  # Вычисляем затраченное время
             print(f"Файл успешно обновлен и сохранен. Время выполнения: {format_elapsed_time(elapsed_time)}")
         else:
             print("Файл 'Показы и затраты ОЗ_2.0.xlsx' не найден.")

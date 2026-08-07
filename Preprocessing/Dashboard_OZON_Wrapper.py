@@ -112,7 +112,7 @@ def _apply_xlsx_inplace_edits(src):
         ws = wb["Statistics"]
 
         # удаление столбцов (после каждого delete_cols индексы сдвигаются → перечитываем headers)
-        for col_to_drop in ("Название товара"):
+        for col_to_drop in (["Название товара"]):
             headers = _headers(ws)
             if col_to_drop in headers:
                 idx = headers.index(col_to_drop) + 1  # 1-based
@@ -190,7 +190,7 @@ def copy_and_convert_sku_statistics(downloads_path, filename):
         print(f"✅ Столбец '{column_name}' был изменен на '{target_column_name}'.")
     else:
         print(f"⚠️ Столбец '{column_name}' не найден.")
-    df.drop(columns="Место размещения", inplace=True)
+    df.drop(columns="Место размещения", inplace=True, errors='ignore')
     # Приведение типов — данные после _apply_xlsx_inplace_edits уже без '-' и с
     # правильными именами столбцов.
     df['CTR, %']                  = pd.to_numeric(df['CTR, %'], errors='coerce')

@@ -330,12 +330,12 @@ def main():
     unify_columns(voronka_wb)
     copy_latest_cost_history() # 2
     # # 3
-    new_file_path = duplicate_latest_week_file()
-    old_dates = extract_dates_from_query(new_file_path, query_name)
-    update_power_query_steps(new_file_path, query_name, old_dates) # 3.1-3.3
+    # new_file_path = duplicate_latest_week_file()
+    # old_dates = extract_dates_from_query(new_file_path, query_name)
+    # update_power_query_steps(new_file_path, query_name, old_dates) # 3.1-3.3
 
-    update_latest_week_file() # 4
-    update_zatraty_wb2() # 6
+    # update_latest_week_file() # 4
+    # update_zatraty_wb2() # 6
     
     # Запускаем скрипт
     # subprocess.run(['DB_WB_1.1.exe'], check=True)

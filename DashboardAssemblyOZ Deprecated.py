@@ -1,5 +1,4 @@
 import os
-import sys
 import pandas as pd
 import numpy as np
 from sqlalchemy import create_engine
@@ -16,17 +15,6 @@ import datetime
 # from datetime import datetime
 import pyarrow as pa
 import pyarrow.csv as csv
-
-# ---- PostgreSQL connection (same pattern as DashboardAssemblyWB_SQLBased.py) ----
-PREPROCESSING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Preprocessing")
-
-def _get_pg_engine():
-    sys.path.insert(0, PREPROCESSING_DIR)
-    from ozon_union_db import load_db_config, get_engine
-    cfg = load_db_config()
-    return get_engine(cfg)
-
-PG_LOOKBACK_DAYS = 45
 
 # Функция для форматирования времени в часы, минуты и секунды
 def format_elapsed_time(seconds):
@@ -78,86 +66,46 @@ SQL_DATABASE_DBREPORT = "DBReport"
 SQL_DATABASE_DBPARTNERS = "DBPartners"
 
 def assemble():
-    print("Начинаем собирать Базу Данных (SQL-based: воронка, затраты и union из PostgreSQL)...")
+    print("Начинаем собирать Базу Данных...")
     start_all_time = time.time()
     engine = connect_to_sql(SQL_SERVER, SQL_DATABASE_DBPARTNERS)
 
-    # ---- PostgreSQL engine and cutoff (shared across all PG queries) ----
-    pg_engine = _get_pg_engine()
-    cutoff = (pd.Timestamp.today() - pd.DateOffset(days=PG_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    # 1. Воронка
+    # import pandas as pd
+    # import glob
+    # import os
+    # import datetime
+    # import pyodbc
 
-    # =================================================================
-    # 1. Воронка (из PostgreSQL work.ozon_sales_funnel)
-    # =================================================================
-    df_voronka = pd.read_sql(
-        f'''SELECT * FROM work.ozon_sales_funnel WHERE "Дата" >= '{cutoff}' ''',
-        pg_engine
-    )
-    df_voronka["Дата"] = pd.to_datetime(df_voronka["Дата"], errors="coerce")
+    # Папки
+    path_voronka = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\ВЫГРУЗКА воронка Озон"
+    path_zatraty = r"Z:\Analytics\Marketplaceanalytics\Федоров\Дашбоард по рекламным кампаниям\!!!_ИСХОДНИКИ ДЛЯ ДАШБОРДА_НЕ УДАЛЯТЬ_!!!\Затраты\Озон. Затраты из Аналитики"
 
-    # Rename columns from SQL Server / PG names to assembly-expected names
-    df_voronka.rename(columns={
-        "Ozon ID": "Ozon ID",
-        "Показы всего": "Показы, всего",
-        "Показы на карточке": "Показы на карточке товара",
-        "Показы в поиске": "Показы в поиске и каталоге",
-        "Позиция": "Позиция в поиске и каталоге",
-        "В корзину всего": "В корзину, всего",
-        "Отменено": "Отменено товаров",
-        "Доставлено": "Доставлено товаров",
-        "Возвращено": "Возвращено товаров",
-        "В корзину из карточки": "В корзину из карточки товара",
-        "В корзину из поиска": "В корзину из поиска или каталога",
-    }, inplace=True, errors="ignore")
+    # === 1. ВОРОНКА ===
+    df_voronka_list = []
+    files_voronka = glob(os.path.join(path_voronka, "analytics_report_*.xlsx"))
 
-    # Колонка "Артикул" критична: без неё groupby не сворачивает размеры
-    # одного товара → показы раздуваются в ~4x.
-    # Проверяем: если Артикул отсутствует, пуст или содержит только цифры
-    # (= Ozon ID вместо настоящего артикула) → строим маппинг из Excel.
-    _need_artikul_map = False
-    if "Артикул" not in df_voronka.columns:
-        _need_artikul_map = True
-    else:
-        _sample = df_voronka["Артикул"].dropna().astype(str).head(100)
-        _has_letters = _sample.str.contains(r'[A-Za-zА-Яа-я]', regex=True).any()
-        if not _has_letters:
-            _need_artikul_map = True
-            print("⚠ Колонка 'Артикул' содержит только цифры (= Ozon ID)")
+    for file in files_voronka:
+        # достаём дату из имени файла
+        fname = os.path.basename(file)
+        try:
+            report_date = str(datetime.datetime.strptime(fname.split("_")[2], "%Y-%m-%d").date() - timedelta(days=1))
+        except Exception:
+            raise Exception("Невозможно определить дату из имени файла:", fname)
 
-    if _need_artikul_map and "Ozon ID" in df_voronka.columns:
-        print("Строим маппинг Ozon ID → Артикул из Excel-файлов воронки...")
-        _oz_funnel_dir = os.path.normpath(os.path.join(
-            FOLDER_PATH, "ВЫГРУЗКА воронка Озон"))
-        _excel_files = sorted(glob(os.path.join(_oz_funnel_dir, "analytics_report_*.xlsx")))[-5:]
-        _map_parts = []
-        for _ef in _excel_files:
-            try:
-                _mdf = pd.read_excel(_ef, engine="calamine", usecols=["Ozon ID", "Артикул"])
-                _map_parts.append(_mdf.drop_duplicates(subset=["Ozon ID"]))
-            except Exception:
-                pass
-        if _map_parts:
-            _mapping_df = pd.concat(_map_parts, ignore_index=True).drop_duplicates(subset=["Ozon ID"])
-            _mapping = _mapping_df.set_index(
-                _mapping_df["Ozon ID"].astype(str).str.strip()
-            )["Артикул"]
-            df_voronka["Артикул"] = (
-                df_voronka["Ozon ID"].astype(str).str.strip().map(_mapping)
-            )
-            _mapped = df_voronka["Артикул"].notna().sum()
-            _total = len(df_voronka)
-            print(f"✓ Маппинг: {_mapped}/{_total} строк ({100*_mapped/_total:.1f}%)")
-            df_voronka["Артикул"] = df_voronka["Артикул"].fillna(
-                df_voronka["Ozon ID"].astype(str))
-        else:
-            print("⚠ Нет Excel-файлов для маппинга — используется Ozon ID")
-            df_voronka["Артикул"] = df_voronka["Ozon ID"].astype(str)
+        df = pd.read_excel(file, engine='calamine')
 
-    df_voronka["Дата"] = df_voronka["Дата"].dt.strftime("%Y-%m-%d")
+        # Чистим "Позиция в поиске и каталоге" от запятых
+        df["Позиция в поиске и каталоге"] = (
+            df["Позиция в поиске и каталоге"]
+            .astype(str)
+            .str.replace(",", ".", regex=False)
+        )
 
-    # типы (PG data is already numeric, but cast for safety; skip string cleanup)
-    try:
-        df_voronka = df_voronka.astype({
+        # df["Позиция в поиске и каталоге"] = pd.to_numeric(df["Позиция в поиске и каталоге"], errors="coerce")
+        # print(df.head(20))
+        # типы
+        df = df.astype({
             "Артикул": "string",
             "Показы, всего": "Int64",
             "Показы на карточке товара": "Int64",
@@ -171,94 +119,20 @@ def assemble():
             "Заказано на сумму": "float64",
             "В корзину из карточки товара": "Int64"
         })
-    except Exception:
-        pass  # PG types may already be correct
 
-    df_voronka["Выкупили ШТ"] = df_voronka["Заказано товаров"] - df_voronka["Отменено товаров"] - df_voronka["Возвращено товаров"]
-    df_voronka["Артикул"] = df_voronka["Артикул"].astype(str).str.split("-").str[0]
+        df["Дата"] = report_date
 
-    # ─── РАННИЙ ДЖОЙН ЗАТРАТ (до groupby, пока все Ozon ID на месте) ───
-    # В PG воронка хранится по Ozon ID (~209K/день), а после groupby по
-    # Артикул-prefix (~54K/день) выживает только 1 Ozon ID из ~4 (first).
-    # Если джойнить затраты ПОСЛЕ groupby — 3/4 затрат теряются.
-    # Решение: джойним затраты к воронке ДО groupby на уровне Ozon ID,
-    # чтобы при группировке затраты суммировались вместе с показами.
-    print("\n── Ранний джойн затрат к воронке (до groupby) ──")
+        df["Выкупили ШТ"] = df["Заказано товаров"] - df["Отменено товаров"] - df["Возвращено товаров"]
+        df["Артикул"] = df["Артикул"].astype(str).str.split("-").str[0]
 
-    _df_costs = pd.read_sql(
-        f'''SELECT * FROM work.ozon_costs_statistics WHERE "Дата" >= '{cutoff}' ''',
-        pg_engine
-    )
-    _df_costs["Дата"] = pd.to_datetime(_df_costs["Дата"], errors="coerce").dt.strftime("%Y-%m-%d")
-
-    _df_costs.rename(columns={
-        "Расход руб.": "Расход, ₽",
-        "Продажи в продвижении руб.": "Продажи, ₽",
-        "Продано товаров шт": "Заказы, шт",
-        "CTR %": "CTR, %",
-        "Показы": "Рекламные показы",
-        "Клики": "Рекламные клики",
-    }, inplace=True, errors="ignore")
-
-    _cost_metrics = ["Расход, ₽", "Продажи, ₽", "Заказы, шт",
-                     "Рекламные показы", "Рекламные клики"]
-    _cost_metrics = [c for c in _cost_metrics if c in _df_costs.columns]
-    for c in _cost_metrics:
-        _df_costs[c] = pd.to_numeric(
-            _df_costs[c].astype(str)
-            .str.replace(' ', '', regex=False)
-            .str.replace(' ', '', regex=False)
-            .str.replace('₽', '', regex=False)
-            .str.replace(',', '.', regex=False),
-            errors='coerce'
-        )
-
-    # Нормализуем ключ SKU (= Ozon ID) в затратах
-    _df_costs["SKU"] = (
-        _df_costs["SKU"].astype(str).str.strip().str.upper()
-        .str.replace(r'\.0$', '', regex=True)
-    )
-
-    # Агрегируем затраты по (Дата, SKU) — убираем дубли по кампаниям
-    _costs_agg = (
-        _df_costs
-        .groupby(["Дата", "SKU"], as_index=False)[_cost_metrics]
-        .sum(min_count=1)
-    )
-
-    # Нормализуем Ozon ID в воронке для джойна
-    df_voronka["Ozon ID"] = (
-        df_voronka["Ozon ID"].astype(str).str.strip().str.upper()
-        .str.replace(r'\.0$', '', regex=True)
-    )
-
-    _before_costs = _costs_agg["Расход, ₽"].sum() if "Расход, ₽" in _costs_agg.columns else 0
-    print(f"  Затраты до джойна: {_before_costs:,.2f} ₽ ({len(_costs_agg):,} строк)")
-
-    # LEFT join: воронка (по Ozon ID) ← затраты (по SKU = Ozon ID)
-    df_voronka = df_voronka.merge(
-        _costs_agg.rename(columns={"SKU": "Ozon ID"}),
-        on=["Дата", "Ozon ID"],
-        how="left",
-    )
-    # Заполняем NaN нулями в метриках затрат
-    for c in _cost_metrics:
-        if c in df_voronka.columns:
-            df_voronka[c] = df_voronka[c].fillna(0)
-
-    _after_costs = df_voronka["Расход, ₽"].sum() if "Расход, ₽" in df_voronka.columns else 0
-    _matched = (df_voronka["Расход, ₽"] > 0).sum() if "Расход, ₽" in df_voronka.columns else 0
-    print(f"  Затраты после джойна: {_after_costs:,.2f} ₽ ({_matched:,} строк с расходом)")
-    print(f"  Потеря: {_before_costs - _after_costs:,.2f} ₽")
-
-    del _df_costs, _costs_agg
-    # ─── КОНЕЦ РАННЕГО ДЖОЙНА ──────────────────────────────────────────
+        df_voronka_list.append(df)
+    df_voronka = pd.concat(df_voronka_list, ignore_index=True)
 
     sum_cols_all = [
         "Показы, всего",
         "Показы на карточке товара",
         "Показы в поиске и каталоге",
-        "Позиция в поиске и каталоге",
+        "Позиция в поиске и каталоге",          # суммируем, как в вашем примере
         "В корзину, всего",
         "Заказано товаров",
         "Отменено товаров",
@@ -266,48 +140,35 @@ def assemble():
         "Возвращено товаров",
         "Заказано на сумму",
         "В корзину из карточки товара",
-        "В корзину из поиска или каталога",
-        "Выкупили ШТ",
-        "Расход, ₽",
-        "Продажи, ₽",
-        "Заказы, шт",
-        "Рекламные показы",
-        "Рекламные клики",
+        "В корзину из поиска или каталога",     # если есть в выгрузке
+        "Выкупили ШТ"
     ]
     sum_cols = [c for c in sum_cols_all if c in df_voronka.columns]
     df_voronka.rename(columns={
                             "Артикул": "Артикул",
                             "Продажи, ₽": "Рекламные заказано на сумму",
-                            "Рекламные показы": "Рекламные показы",
-                            "Рекламные клики": "Рекламные показы на карточке товара",
+                            "Показы": "Рекламные показы",
+                            "Клики": "Рекламные показы на карточке товара",
                             "Заказы, шт": "Рекламные заказано товаров"
                         }, inplace=True, errors="ignore")
-    # Обновим sum_cols после переименований
-    sum_cols = [c for c in sum_cols_all if c in df_voronka.columns]
-    # Добавим переименованные колонки
-    for c in ["Рекламные заказано на сумму", "Рекламные показы на карточке товара",
-              "Рекламные заказано товаров", "Расход, ₽"]:
-        if c in df_voronka.columns and c not in sum_cols:
-            sum_cols.append(c)
-
+    # 2) безопасно приводим эти метрики к числам (NaN -> 0 перед суммированием)
     for c in sum_cols:
         df_voronka[c] = pd.to_numeric(df_voronka[c], errors="coerce").fillna(0)
 
-    # нечисловые поля
+    # 3) нечисловые поля, которые логично брать первыми в группе
     first_cols_all = ["Тип товара", "Товары", "Модель", "Ozon ID"]
     first_cols = [c for c in first_cols_all if c in df_voronka.columns]
 
+    # 4) готовим словарь агрегаций
     agg_dict = {c: "sum" for c in sum_cols}
     agg_dict.update({c: "first" for c in first_cols})
 
-    # groupby теперь суммирует И воронку, И затраты
+    # 5) группируем и получаем одну строку на (Дата, Артикул)
     df_voronka = (
         df_voronka
         .groupby(["Дата", "Артикул"], as_index=False)
         .agg(agg_dict)
     )
-    print(f"  После groupby: {len(df_voronka):,} строк, "
-          f"Расход = {df_voronka['Расход, ₽'].sum():,.2f} ₽" if "Расход, ₽" in df_voronka.columns else "")
 
 
     # 2. Получить данные из файла "Справочник.xlsx"
@@ -416,128 +277,153 @@ def assemble():
 
 
     # 4. Получить данные таблицы с SQL (РазмерыНаАгрегаторе)
-    df_sizes = pd.DataFrame()
-    df_distribution = pd.DataFrame()
     try:
         print("Начинаем получать данные для РазмеровНаАгрегаторе...")
-        start_time = time.time()
+        start_time = time.time()  # Запускаем таймер
         query_sizes = f"""
             SELECT a.[dt] AS [Дата], a.[itemid] AS [Артикул], COUNT(DISTINCT(a.[INVENTSIZEID])) AS [Колво размеров]
             FROM [DBPartners].[dbo].[WblmRepGetStockOzon] a
-            WHERE [dt] >= '{cutoff}'
+            WHERE [dt] >= '{str(df_voronka['Дата'].min())}'
             GROUP BY [dt], [itemid]
         """
         df_sizes = pd.read_sql(query_sizes, engine)
         df_sizes = format_date_column(df_sizes, 'Дата')
 
+        # Вывод первых 5 строк
         print("Первые 5 строк таблицы РазмерыНаАгрегаторе:")
         print(df_sizes.head())
 
-        elapsed_time = time.time() - start_time
+        elapsed_time = time.time() - start_time  # Вычисляем затраченное время
         print(f"Данные для РазмеровНаАгрегаторе успешно сохранены. Время выполнения: {format_elapsed_time(elapsed_time)}")
     except Exception as e:
         print(f"Ошибка при получении данных для РазмеровНаАгрегаторе: {e}")
 
+
+
     # 5. Связать "РазмерыНаАгрегаторе" с "ВсегоРазмеров"
-    if not df_sizes.empty:
-        try:
-            print("Начинаем создавать таблицу Дистрибуция...")
-            start_time = time.time()
+    try:
+        print("Начинаем создавать таблицу Дистрибуция...")
+        start_time = time.time()  # Запускаем таймер
 
-            df_distribution = pd.merge(df_sizes, df_reference_unique, on="Артикул", how="left")
+        # Объединяем таблицы по полю "Артикул"
+        df_distribution = pd.merge(df_sizes, df_reference_unique, on="Артикул", how="left")
 
-            df_distribution["Дистрибуция"] = df_distribution.apply(
-                lambda row: row["Колво размеров"] / row["Всего размеров"] if row["Всего размеров"] != 0 else 0,
-                axis=1
-            )
+        # Вычисляем дистрибуцию с проверкой на деление на ноль
+        df_distribution["Дистрибуция"] = df_distribution.apply(
+            lambda row: row["Колво размеров"] / row["Всего размеров"] if row["Всего размеров"] != 0 else 0,
+            axis=1
+        )
 
-            df_distribution = df_distribution[["Дата", "Артикул", "Дистрибуция"]]
-            df_distribution = format_date_column(df_distribution, 'Дата')
+        # Оставляем только нужные столбцы
+        df_distribution = df_distribution[["Дата", "Артикул", "Дистрибуция"]]
 
-            print("Первые 5 строк таблицы Дистрибуция:")
-            print(df_distribution.head())
+        # Форматирование даты
+        df_distribution = format_date_column(df_distribution, 'Дата')
 
-            elapsed_time = time.time() - start_time
-            print(f"Таблица Дистрибуция успешно создана. Время выполнения: {format_elapsed_time(elapsed_time)}")
-        except Exception as e:
-            print(f"Ошибка при создании таблицы Дистрибуция: {e}")
-    else:
-        print("⚠ РазмерыНаАгрегаторе пусты — пропуск создания Дистрибуции")
+        # Вывод первых 5 строк
+        print("Первые 5 строк таблицы Дистрибуция:")
+        print(df_distribution.head())
+
+        elapsed_time = time.time() - start_time  # Вычисляем затраченное время
+        print(f"Таблица Дистрибуция успешно создана. Время выполнения: {format_elapsed_time(elapsed_time)}")
+    except Exception as e:
+        print(f"Ошибка при создании таблицы Дистрибуция: {e}")
 
 
     # 6. Получить данные таблицы с SQL (Остатки)
-    df_stock = pd.DataFrame()
-    df_stock_with_distribution = pd.DataFrame()
     try:
         print("Начинаем получать данные для Остатков...")
-        start_time = time.time()
+        start_time = time.time()  # Запускаем таймер
         query_stock = f"""
             SELECT a.[dt] AS [Дата], a.[itemid] AS [Артикул], SUM(a.[free_to_sell_amount]) AS [Остаток Агрегатора]
             FROM [DBPartners].[dbo].[WblmRepGetStockOzon] a
-            WHERE [dt] >= '{cutoff}'
+            WHERE [dt] >= '{str(df_voronka['Дата'].min())}'
             GROUP BY [dt], [itemid]
         """
         df_stock = pd.read_sql(query_stock, engine)
         df_stock = format_date_column(df_stock, 'Дата')
 
+        # Вывод первых 5 строк
         print("Первые 5 строк таблицы Остатков:")
         print(df_stock.head())
 
-        elapsed_time = time.time() - start_time
+        elapsed_time = time.time() - start_time  # Вычисляем затраченное время
         print(f"Данные для Остатков успешно сохранены. Время выполнения: {format_elapsed_time(elapsed_time)}")
     except Exception as e:
         print(f"Ошибка при получении данных для Остатков: {e}")
-        import traceback; traceback.print_exc()
-
     # 7. Связать "Остатки" с "Дистрибуция"
-    if not df_stock.empty:
-        try:
-            print("Начинаем создавать таблицу Остатки с дистрибуцией...")
-            start_time = time.time()
-            df_stock_with_distribution = pd.merge(df_stock, df_distribution, on=["Дата", "Артикул"], how="left")
-            df_stock_with_distribution = format_date_column(df_stock_with_distribution, 'Дата')
+    try:
+        print("Начинаем создавать таблицу Остатки с дистрибуцией...")
+        start_time = time.time()  # Запускаем таймер
+        df_stock_with_distribution = pd.merge(df_stock, df_distribution, on=["Дата", "Артикул"], how="left")
+        df_stock_with_distribution = format_date_column(df_stock_with_distribution, 'Дата')
 
-            print("Первые 5 строк таблицы Остатки с дистрибуцией:")
-            print(df_stock_with_distribution.head())
+        # Вывод первых 5 строк
+        print("Первые 5 строк таблицы Остатки с дистрибуцией:")
+        print(df_stock_with_distribution.head())
 
-            elapsed_time = time.time() - start_time
-            print(f"Таблица Остатки с дистрибуцией успешно создана. Время выполнения: {format_elapsed_time(elapsed_time)}")
-        except Exception as e:
-            print(f"Ошибка при создании таблицы Остатки с дистрибуцией: {e}")
-            import traceback; traceback.print_exc()
-    else:
-        print("⚠ Остатки пусты — пропуск создания таблицы Остатки с дистрибуцией")
+        elapsed_time = time.time() - start_time  # Вычисляем затраченное время
+        print(f"Таблица Остатки с дистрибуцией успешно создана. Время выполнения: {format_elapsed_time(elapsed_time)}")
+    except Exception as e:
+        print(f"Ошибка при создании таблицы Остатки с дистрибуцией: {e}")
 
     del df_stock
 
 
 
-    # =================================================================
-    # 8. Загрузка данных о затратах (из PostgreSQL work.ozon_costs_statistics)
-    # =================================================================
-    df_zatraty = pd.read_sql(
-        f'''SELECT * FROM work.ozon_costs_statistics WHERE "Дата" >= '{cutoff}' ''',
-        pg_engine
-    )
-    df_zatraty["Дата"] = pd.to_datetime(df_zatraty["Дата"], errors="coerce")
+    # 8. Загрузка данных о затратах
+    # === 2. ЗАТРАТЫ ===
+    df_zatraty_list = []
+    files_zatraty = glob(os.path.join(path_zatraty, "*.csv"))
 
-    # Rename PG columns to match what the assembly expects
-    df_zatraty.rename(columns={
-        "Расход руб.": "Расход, ₽",
-        "Продажи в продвижении руб.": "Продажи, ₽",
-        "Продано товаров шт": "Заказы, шт",
-        "CTR %": "CTR, %",
-        "Добавления в корзину шт": "В корзину",
-        "ДРР в продвижении %": "ДРР, %",
-        "Конверсия в корзину %": "Конверсия в корзину, %",
-        "Затраты на заказ руб.": "Затраты на заказ, ₽",
-        "Стоимость клика руб.": "Стоимость клика, ₽",
-    }, inplace=True, errors="ignore")
+    for f in files_zatraty:
+        # дата из имени файла
+        fname = os.path.basename(f).replace(".csv", "")
+        file_date = pd.to_datetime(fname, dayfirst=True, errors="coerce")
 
-    # Rename "Тип продвижения" -> "ТипАктивности" (if present from old format)
-    # In the New Format, the column is "Инструмент" — the ТипАктивности will be derived in step 12
-    df_zatraty.rename(columns={"Тип продвижения": "ТипАктивности"}, inplace=True, errors="ignore")
+        # читаем csv
+        df = pd.read_csv(f, sep=";", skiprows=2)
 
+        # чистим названия колонок
+        df.columns = [c.replace(".csv","") if ".csv" in c else c for c in df.columns]
+
+        # вставляем дату из имени файла
+        df["Дата"] = file_date
+
+        # переименования
+        df = df.rename(columns={
+            "Тип продвижения": "ТипАктивности",
+            "Расход, ₽, с НДС": "Расход, ₽"
+        })
+
+        # Числовые колонки в CSV могут прийти как строки с запятой-разделителем ("0,00",
+        # "1 234,56 ₽", "8103,00") или как int64 (когда все значения целые). После
+        # pd.concat смешанные типы схлопываются в object, и groupby(...).sum() склеивает
+        # строки вместо числового суммирования.
+        # Начиная с выгрузок 24.04.2026 Ozon стал возвращать с запятой ВСЕ числовые
+        # колонки (не только деньги), включая Показы / Клики / Заказы, шт. Поэтому
+        # чистим весь набор метрик, которые потом уйдут в merge_voronka_costs_preserve_impressions
+        # и build_funnel_wide.
+        _numeric_cols = (
+            "Расход, ₽", "Продажи, ₽", "Показы", "Клики", "Заказы, шт",
+            "В корзину", "ДРР, %", "CTR, %", "Конверсия в корзину, %",
+            "Затраты на заказ, ₽", "Стоимость клика, ₽",
+        )
+        for _num_col in _numeric_cols:
+            if _num_col in df.columns:
+                df[_num_col] = pd.to_numeric(
+                    df[_num_col].astype(str)
+                        .str.replace('\u00A0', '', regex=False)
+                        .str.replace(' ', '', regex=False)
+                        .str.replace('₽', '', regex=False)
+                        .str.replace('%', '', regex=False)
+                        .str.replace(',', '.', regex=False),
+                    errors='coerce'
+                )
+
+        df_zatraty_list.append(df)
+
+    df_zatraty = pd.concat(df_zatraty_list, ignore_index=True)
     # [v2] Раньше "Оплата за заказ: выбранные товары" склеивалось с "Оплата за клик".
     # Теперь сохраняем тип как есть — он соответствует одной из 4-х новых категорий.
     # df_zatraty.loc[df_zatraty['ТипАктивности'] == 'Оплата за заказ: выбранные товары', 'ТипАктивности'] = 'Оплата за клик'
@@ -547,7 +433,7 @@ def assemble():
     sql = f"""
     select 'OZ' as AGREGATOR, DT, ITEMID, PRICE
     from [DBPartners].[dbo].[WblmRepPriceDiscountOzReport]
-    where dt >= '{cutoff}'
+    where dt >= '{str(df_voronka['Дата'].min())}'
     """
     df_prices = pd.read_sql(sql, engine)
 
@@ -564,7 +450,7 @@ def assemble():
     # import pandas as pd
     # import numpy as np
 
-    NBSP = ' '
+    NBSP = '\u00A0'
 
     # ---- утилиты ----
     def norm_date(s: pd.Series) -> pd.Series:
@@ -738,54 +624,59 @@ def assemble():
         return df
 
 
-    # =================================================================
-    # 12. Получаем дополнительную информацию по затратам (из PostgreSQL)
-    # =================================================================
-    # df_all: enrichment columns from work.ozon_costs_statistics
-    df_all = pd.read_sql(
-        f'''SELECT "SKU" AS "Артикул OZ", "ID кампании", "Инструмент", "Место размещения", "Дата"
-            FROM work.ozon_costs_statistics WHERE "Дата" >= '{cutoff}' ''',
-        pg_engine
-    )
-    df_all["Дата"] = pd.to_datetime(df_all["Дата"], errors="coerce")
+    # 12. Получаем дополнительную информацию по затратам
+    # Путь до папки
+    folder_path_weeks = os.path.join(FOLDER_PATH, "Затраты", "Озон. Затраты из Аналитики New Format")
 
-    # df_all_union: from work.ozon_promo_union
-    # PG columns: report_date, sku_promo, name_promo, sku_card, name_card, sales_rub, orders_qty, source_file
-    df_all_union = pd.read_sql(
-        f'''SELECT * FROM work.ozon_promo_union WHERE report_date >= '{cutoff}' ''',
-        pg_engine
-    )
-    df_all_union.rename(columns={
-        "report_date": "Дата",
-        "sku_promo": "Артикул OZ",
-        "name_promo": "Название товара в продвижении",
-        "sku_card": "SKU из объединенной карточки",
-        "name_card": "Название товара из объединенной карточки",
-        "sales_rub": "Продажи, ₽",
-        "orders_qty": "Заказы, шт",
-    }, inplace=True, errors="ignore")
-    df_all_union["Дата"] = pd.to_datetime(df_all_union["Дата"], errors="coerce")
-    df_all_union["Артикул OZ"] = df_all_union["Артикул OZ"].astype(str)
+    # Собираем все .xlsx файлы
+    files = glob(os.path.join(folder_path_weeks, "*.xlsx"))
 
+    df_list = []
+    df_list_union = []
+    for file in files:
+        # --- достаём дату из названия файла ---
+        filename = os.path.basename(file)  # например: "Аналитика продвижения_16.09.2025.xlsx"
+        date_str = filename.split("_")[-1].replace(".xlsx", "")  # "16.09.2025"
+        date_parsed = (pd.to_datetime(date_str, format="%d.%m.%Y") - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Dispose PG engine — all PG reads are done
-    pg_engine.dispose()
+        # читаем, пропуская первую строку
+        df_tmp = pd.read_excel(file, engine='calamine', skiprows=1)
+        df_tmp_union = pd.read_excel(file, sheet_name='Union', engine='calamine', skiprows=1)
+
+        # оставляем только нужные колонки
+        cols_keep = ["SKU", "ID кампании", "Инструмент", "Место размещения"]
+        cols_keep_union = ["SKU в продвижении", "SKU из объединенной карточки", "Продажи, ₽", "Заказы, шт"]
+        df_tmp = df_tmp[cols_keep]
+        df_tmp_union = df_tmp_union[cols_keep_union]
+
+        # добавляем колонку "Дата"
+        df_tmp["Дата"] = date_parsed
+        df_tmp_union["Дата"] = date_parsed
+
+        df_list.append(df_tmp)
+        df_list_union.append(df_tmp_union)
+
+    # объединяем все файлы
+    df_all = pd.concat(df_list, ignore_index=True)
+    df_all_union = pd.concat(df_list_union, ignore_index=True)
+    df_all.rename(columns={'SKU': "Артикул OZ"},inplace=True)
+    df_all_union.rename(columns={'SKU в продвижении': "Артикул OZ"},inplace=True)
 
     # Функция для строгой нормализации
     def normalize_key_column(s: pd.Series, col_name: str) -> pd.Series:
         """Строгая нормализация с логированием"""
         original = s.copy()
-
+        
         result = (s.astype(str)
-                .str.replace(' ', '', regex=False)  # неразрывный пробел
+                .str.replace('\u00A0', '', regex=False)  # неразрывный пробел
                 .str.replace(' ', '', regex=False)        # обычный пробел
                 .str.replace('\t', '', regex=False)       # табуляция
                 .str.strip()
                 .str.upper())
-
+        
         changed = (original.astype(str) != result).sum()
         print(f"  Колонка '{col_name}': изменено {changed} значений")
-
+        
         return result
 
     # Применяем ко ВСЕМ ключевым колонкам
@@ -802,27 +693,32 @@ def assemble():
     # # Нормализуем ключи (точно так же, как в merge_voronka_costs_preserve_impressions)
     # df_all['Дата'] = pd.to_datetime(df_all['Дата'], errors='coerce').dt.normalize()
     df_all['Артикул OZ'] = (df_all['Артикул OZ'].astype(str)
-                    .str.replace(' ', '', regex=False)
+                    .str.replace('\u00A0', '', regex=False)
                     .str.strip()
                     .str.upper())
     df_all_union['Артикул OZ'] = (df_all_union['Артикул OZ'].astype(str)
-                    .str.replace(' ', '', regex=False)
+                    .str.replace('\u00A0', '', regex=False)
                     .str.strip()
                     .str.upper())
     df_zatraty['SKU'] = (df_zatraty['SKU'].astype(str)
-                    .str.replace(' ', '', regex=False)
+                    .str.replace('\u00A0', '', regex=False)
                     .str.strip()
                     .str.upper())
 
-    # ===== ШАГ 2: df_zatraty из PG уже содержит Инструмент и Место размещения =====
-    # (в оригинале они добавлялись merge с df_all, но теперь оба источника — одна PG-таблица)
+    # # ===== ШАГ 2: Обогащаем df_zatraty информацией из df_all =====
+    # # ВАЖНО: делаем это ДО вызова merge_voronka_costs_preserve_impressions
 
     # Нормализуем дату в df_zatraty
     df_zatraty['Дата'] = pd.to_datetime(df_zatraty['Дата'], errors='coerce').dt.normalize()
     df_all['Дата'] = pd.to_datetime(df_all['Дата'], errors='coerce').dt.normalize()
 
-    # Просто переименовываем SKU → Артикул OZ (merge не нужен — колонки уже на месте)
-    df_zatraty_enriched = df_zatraty.rename(columns={'SKU': "Артикул OZ"})
+    # Присоединяем инструменты по (SKU, ID кампании, Дата)
+    df_zatraty_enriched = df_zatraty.rename(columns={'SKU': "Артикул OZ"}).merge(
+        df_all[['Дата', 'Артикул OZ', 'ID кампании', 'Инструмент', 'Место размещения']],
+        on=['Дата', 'Артикул OZ', 'ID кампании'],
+        how='left',
+        validate='m:1'  # каждая строка затрат должна найти максимум одну строку в df_all
+    )
 
     # ===== ШАГ 3 [v2]: Создаём ТипАктивности В ЗАТРАТАХ по новым 4 категориям =====
     # Источники классификации:
@@ -855,7 +751,7 @@ def assemble():
     if spend_col:
         df_zatraty_enriched[spend_col] = pd.to_numeric(
             df_zatraty_enriched[spend_col].astype(str)
-            .str.replace(' ', '', regex=False)
+            .str.replace('\u00A0', '', regex=False)
             .str.replace(' ', '', regex=False)
             .str.replace('₽', '', regex=False)
             .str.replace(',', '.', regex=False),
@@ -865,84 +761,163 @@ def assemble():
         df_zatraty_enriched.loc[mask_organic, 'ТипАктивности'] = 'Органика'
 
 
-    # ─── ПРИСОЕДИНЕНИЕ ТипАктивности (без повторного мержа сумм затрат) ───
-    # Суммы затрат (Расход, ₽ и пр.) уже присоединены ранним джойном
-    # до groupby. Здесь добавляем ТОЛЬКО классификацию ТипАктивности.
     print("=" * 80)
-    print("ПРИСОЕДИНЕНИЕ ТипАктивности (суммы затрат уже в воронке)")
+    print("ПРАВИЛЬНЫЙ МЕРЖ БЕЗ ЛИШНЕГО МАППИНГА")
     print("=" * 80)
 
-    df_funnel_final = df_voronka.copy()
+    # ===== ШАГ 1: Подготовка воронки =====
+    print("\nШАГ 1: Подготовка воронки")
+    print("-" * 80)
 
-    # Нормализуем Ozon ID в воронке
-    if 'Ozon ID' in df_funnel_final.columns:
-        df_funnel_final['Артикул OZ'] = (
-            df_funnel_final['Ozon ID']
-            .astype(str).str.strip().str.upper()
-            .str.replace(r'\.0$', '', regex=True)
-        )
-    else:
-        df_funnel_final['Артикул OZ'] = df_funnel_final['Артикул'].astype(str)
+    df_voronka_clean = df_voronka.copy()
 
-    # Из df_zatraty_enriched берём ТОЛЬКО ТипАктивности (без сумм!)
-    _type_map = df_zatraty_enriched[['Артикул OZ', 'Дата', 'ТипАктивности']].copy()
-    _type_map['Артикул OZ'] = (
-        _type_map['Артикул OZ']
-        .astype(str).str.strip().str.upper()
+    # Убедимся, что Ozon ID есть
+    if 'Ozon ID' not in df_voronka_clean.columns:
+        raise ValueError("❌ В воронке нет колонки 'Ozon ID'!")
+
+    # Нормализуем Ozon ID - приводим к строке и убираем лишнее
+    df_voronka_clean['Ozon ID'] = (
+        df_voronka_clean['Ozon ID']
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .str.replace(r'\.0$', '', regex=True)  # убираем .0 если есть
+    )
+
+    print(f"✓ Размер воронки: {len(df_voronka_clean):,} строк")
+    print(f"✓ Заполненность Ozon ID: {df_voronka_clean['Ozon ID'].notna().sum():,} ({100*df_voronka_clean['Ozon ID'].notna().sum()/len(df_voronka_clean):.1f}%)")
+    print(f"✓ Примеры Ozon ID: {df_voronka_clean['Ozon ID'].head(5).tolist()}")
+
+    # ===== ШАГ 2: Подготовка затрат =====
+    print("\nШАГ 2: Подготовка затрат")
+    print("-" * 80)
+
+    df_zatraty_clean = df_zatraty_enriched.copy()
+
+    # Нормализуем Артикул OZ
+    df_zatraty_clean['Артикул OZ'] = (
+        df_zatraty_clean['Артикул OZ']
+        .astype(str)
+        .str.strip()
+        .str.upper()
         .str.replace(r'\.0$', '', regex=True)
     )
-    _type_map['Дата'] = norm_date(_type_map['Дата'])
-    _type_map = _type_map.dropna(subset=['ТипАктивности'])
-    _type_map = _type_map.drop_duplicates(subset=['Дата', 'Артикул OZ'], keep='first')
 
-    df_funnel_final['Дата'] = norm_date(df_funnel_final['Дата'])
+    print(f"✓ Размер затрат: {len(df_zatraty_clean):,} строк")
+    print(f"✓ Уникальных Артикул OZ: {df_zatraty_clean['Артикул OZ'].nunique():,}")
+    print(f"✓ Примеры Артикул OZ: {df_zatraty_clean['Артикул OZ'].head(5).tolist()}")
 
-    _before_len = len(df_funnel_final)
-    df_funnel_final = df_funnel_final.merge(
-        _type_map[['Дата', 'Артикул OZ', 'ТипАктивности']],
-        on=['Дата', 'Артикул OZ'],
-        how='left',
+    # ===== ШАГ 3: Проверка пересечения =====
+    print("\nШАГ 3: Проверка пересечения ключей")
+    print("-" * 80)
+
+    voronka_ids = set(df_voronka_clean['Ozon ID'].dropna())
+    zatraty_ids = set(df_zatraty_clean['Артикул OZ'].dropna())
+
+    intersection = voronka_ids & zatraty_ids
+
+    print(f"Уникальных ID в воронке: {len(voronka_ids):,}")
+    print(f"Уникальных ID в затратах: {len(zatraty_ids):,}")
+    print(f"Пересечение: {len(intersection):,} ({100*len(intersection)/len(voronka_ids) if voronka_ids else 0:.1f}% от воронки)")
+
+    if len(intersection) == 0:
+        print("\n⚠️ КРИТИЧЕСКАЯ ПРОБЛЕМА: НЕТ ПЕРЕСЕЧЕНИЙ!")
+        print("Возможные причины:")
+        print("  1. Разные периоды данных в воронке и затратах")
+        print("  2. Разные площадки (один файл WB, другой Ozon)")
+        print("  3. Проблема с ID - один Ozon ID, другой SKU")
+        
+        print("\nПримеры ID из воронки:")
+        print(list(voronka_ids)[:10])
+        print("\nПримеры ID из затрат:")
+        print(list(zatraty_ids)[:10])
+        
+        raise ValueError("Невозможно продолжить без пересечений!")
+
+    # ===== ШАГ 4: Мерж через функцию =====
+    print("\nШАГ 4: Финальный мерж")
+    print("-" * 80)
+
+    # Переименуем Ozon ID -> Артикул OZ для единообразия
+    df_voronka_clean = df_voronka_clean.rename(columns={'Ozon ID': 'Артикул OZ'})
+
+    df_prices_exists = 'df_prices' in globals()
+
+    df_funnel_final = merge_voronka_costs_preserve_impressions(
+        df_voronka=df_voronka_clean,
+        df_costs=df_zatraty_clean,
+        df_prices=df_prices,# if df_prices_exists else None,
+        preserve_cols=('Показы, всего',),
+        left_key_candidates=('Артикул OZ',),    # ← теперь одинаковое название!
+        right_key='Артикул OZ',                 # ← и тут тоже!
+        add_tail=False,
+        type_col_candidates=('ТипАктивности',)
     )
-    assert len(df_funnel_final) == _before_len, \
-        f"Мерж ТипАктивности раздул строки: {_before_len} -> {len(df_funnel_final)}"
 
-    _matched = df_funnel_final['ТипАктивности'].notna().sum()
-    print(f"  ТипАктивности присвоен {_matched:,} строкам из {_before_len:,}")
-    del _type_map
+    print("\n✅ Мерж завершён!")
 
-    # Мерж цен (m:1 по Дата, Артикул)
-    if 'df_prices' in dir() and not df_prices.empty:
-        df_prices['Артикул'] = df_prices['Артикул'].astype(str).str.strip()
-        df_prices['Дата'] = norm_date(df_prices['Дата'])
-        df_funnel_final = df_funnel_final.merge(
-            df_prices[['Дата', 'Артикул', 'Цена']].drop_duplicates(subset=['Дата', 'Артикул']),
-            on=['Дата', 'Артикул'],
-            how='left',
-        )
+    # ===== ШАГ 5: Заполняем органику =====
+    print("\nШАГ 5: Заполнение органического трафика")
+    print("-" * 80)
 
-    # Заполняем органику: нет типа + расход=0 + есть показы
-    spend_col = next((c for c in ['Расход, ₽', 'Расход, руб'] if c in df_funnel_final.columns), None)
+    spend_col = next((c for c in ['Расход, ₽','Расход, руб'] if c in df_funnel_final.columns), None)
     shows_col = next((c for c in ['Показы, всего', 'Показы'] if c in df_funnel_final.columns), None)
+
     if spend_col and shows_col:
+        # Нормализуем колонки
         df_funnel_final[spend_col] = pd.to_numeric(df_funnel_final[spend_col], errors='coerce').fillna(0)
         df_funnel_final[shows_col] = pd.to_numeric(df_funnel_final[shows_col], errors='coerce').fillna(0)
+        
+        # Маска для органики: нет типа + расход=0 + есть показы
         mask_organic = (
             df_funnel_final['ТипАктивности'].isna() &
             (df_funnel_final[spend_col] == 0) &
             (df_funnel_final[shows_col] > 0)
         )
+        
+        organic_count_before = mask_organic.sum()
         df_funnel_final.loc[mask_organic, 'ТипАктивности'] = 'Органика'
-        print(f"  Заполнено 'Органика' для {mask_organic.sum():,} строк")
+        
+        print(f"✓ Заполнено 'Органика' для {organic_count_before:,} строк")
 
-    # Финальная статистика
-    print(f"\n  Размер результата: {len(df_funnel_final):,} строк")
+    # ===== ШАГ 6: Финальная статистика =====
+    print("\n" + "=" * 80)
+    print("ФИНАЛЬНАЯ СТАТИСТИКА")
+    print("=" * 80)
+
+    print(f"\nРазмер результата: {len(df_funnel_final):,} строк")
+
+    print("\nРаспределение ТипАктивности:")
+    type_counts = df_funnel_final['ТипАктивности'].value_counts(dropna=False)
+    print(type_counts)
+
+    nan_count = df_funnel_final['ТипАктивности'].isna().sum()
+    nan_pct = 100 * nan_count / len(df_funnel_final)
+    print(f"\nСтрок с NaN: {nan_count:,} ({nan_pct:.1f}%)")
+
+    if nan_pct < 20:
+        print("\n✅ УСПЕХ! Доля NaN < 20%")
+    elif nan_pct < 50:
+        print("\n⚠️ ЧАСТИЧНО РЕШЕНО: Доля NaN {:.1f}%".format(nan_pct))
+    else:
+        print("\n❌ ПРОБЛЕМА: Доля NaN всё ещё {:.1f}%".format(nan_pct))
+
+    # Проверка расходов
     if spend_col:
-        _total_spend = df_funnel_final[spend_col].sum()
-        print(f"  Итого расход: {_total_spend:,.2f} ₽")
-    print(f"  Распределение ТипАктивности:")
-    print(df_funnel_final['ТипАктивности'].value_counts(dropna=False))
+        total_spend = df_funnel_final[spend_col].sum()
+        original_spend = df_zatraty_clean[spend_col].sum()
+        print(f"\nСумма расходов:")
+        print(f"  - В затратах: {original_spend:,.2f} ₽")
+        print(f"  - В результате: {total_spend:,.2f} ₽")
+        print(f"  - Разница: {total_spend - original_spend:,.2f} ₽")
 
+    print("\n" + "=" * 80)
+    print("ГОТОВО! Результат в переменной df_funnel_final")
+    print("=" * 80)
+
+    # Сохраняем в df_funnel для удобства
     df_funnel = df_funnel_final
+    print("\n✓ Также сохранено в df_funnel")
 
     df_union_reference = pd.merge(df_reference[['Артикул', 'Артикул OZ']], df_all_union, on="Артикул OZ", how='right')
     # df_union_reference[df_union_reference['Артикул'].isna()]
@@ -990,19 +965,15 @@ def assemble():
         df_funnel = df_funnel.copy()
         df_reference = df_reference.copy()
 
-        # Нормализуем "Артикул OZ" в воронке (пришёл из "Ozon ID" ← строка 815)
-        df_funnel["Артикул OZ"] = (df_funnel["Артикул OZ"].fillna('')
-                                                .astype(str).str.strip()
-                                                .str.replace(r'\.0$', '', regex=True))
         df_funnel["Артикул"] = (df_funnel["Артикул"].fillna('')
-                                                .astype(str).str.strip()
-                                                .str.replace(r'\.0$', '', regex=True))
+                                                .astype(str).str.strip().str.upper()
+                                                .str[:8])
         df_reference["Артикул"] = (df_reference["Артикул"].fillna('')
                                                         .astype(str).str.strip().str.upper()
                                                         .str[:8])
-        df_reference["Артикул OZ"] = (df_reference["Артикул OZ"].fillna('')
-                                                        .astype(str).str.strip()
-                                                        .str.replace(r'\.0$', '', regex=True))
+
+        # Приведём дату в единый формат (без времени)
+        # df_funnel["Дата"] = pd.to_datetime(df_funnel["Дата"], errors="coerce").dt.normalize()
 
         # --- 2) Оставляем только нужные поля справочника ---
         reference_columns = [
@@ -1011,19 +982,22 @@ def assemble():
             "Байер", "Две последние коллекции", "Основной артикул", "Себестоимость с НДС",
             "Процент выкупа", "НДС", "Ответственный за группу", "Группа для отчетов"
         ]
+        # оставим только реально существующие колонки
         reference_columns = [c for c in reference_columns if c in df_reference.columns]
         df_reference_filtered = df_reference[["Артикул"] + [c for c in reference_columns if c != "Артикул"]].copy()
 
-        # --- 3) Делаем справочник УНИКАЛЬНЫМ по Артикул OZ (one-row-per-Ozon ID) ---
-        df_reference_filtered = df_reference_filtered[df_reference_filtered["Артикул OZ"] != '']
-        dups = df_reference_filtered["Артикул OZ"].duplicated(keep=False).sum()
+        # --- 3) Делаем справочник УНИКАЛЬНЫМ по Артикулу (one-row-per-Артикул) ---
+        # Если есть дубликаты одного артикула — берём первую строку (можно заменить на приоритетное правило)
+        dups = df_reference_filtered["Артикул"].duplicated(keep=False).sum()
         if dups:
-            print(f"[INFO] В справочнике обнаружены дубликаты по 'Артикул OZ': {dups} строк.")
+            print(f"[INFO] В справочнике обнаружены дубликаты по 'Артикул' (после .str[:8]): {dups} строк.")
         ref_unique = (df_reference_filtered
-                    .sort_values(["Артикул OZ"])
-                    .drop_duplicates(subset=["Артикул OZ"], keep="first")
+                    .sort_values(["Артикул"])
+                    .drop_duplicates(subset=["Артикул"], keep="first")
                     .reset_index(drop=True))
-        assert not ref_unique["Артикул OZ"].duplicated().any(), "ref_unique содержит дубликаты Артикул OZ"
+
+        # sanity: строго уникально
+        assert not ref_unique["Артикул"].duplicated().any(), "ref_unique всё ещё содержит дубликаты Артикул"
 
         # --- 4) Контроль инвариантов расхода ДО merge ---
         try:
@@ -1039,27 +1013,17 @@ def assemble():
         else:
             print("[INFO] В df_funnel нет колонки расхода — инварианты по расходу не проверяем.")
 
+        del ref_unique['Артикул OZ']
         del ref_unique['Модель']
-        # --- 5) LEFT-merge по Артикул OZ (Ozon ID): и воронка, и справочник имеют эту колонку ---
-        ref_unique = ref_unique.rename(columns={"Артикул": "Артикул_internal"})
+        # --- 5) LEFT-merge строго m:1 (исключает размножение строк) ---
         df_funnel_reference = pd.merge(
             df_funnel,
             ref_unique,
-            on="Артикул OZ",
+            on="Артикул",
             how="left",
-            validate="m:1",
+            validate="m:1",     # если справа снова появятся дубликаты — упадёт сразу
             indicator=False
         )
-        # Для несматченных строк "Артикул OZ" уже заполнен (из воронки), ничего не теряется.
-
-        # Убираем служебный столбец и любые _x/_y артефакты от merge
-        _drop_cols = ["Артикул_internal"]
-        _drop_cols += [c for c in df_funnel_reference.columns if c.startswith("Артикул OZ_")]
-        df_funnel_reference.drop(columns=_drop_cols, inplace=True, errors="ignore")
-
-        _matched = df_funnel_reference["Себестоимость с НДС"].notna().sum()
-        _total = len(df_funnel_reference)
-        print(f"[INFO] Merge по Ozon ID: {_matched}/{_total} строк получили Себестоимость ({100*_matched/_total:.1f}%)")
 
         # Ничего НЕ дропаем из df_funnel_reference! (drop_duplicates ломает суммы)
 
@@ -1096,7 +1060,7 @@ def assemble():
     df_funnel_reference['Расход, ₽'] = pd.to_numeric(
         df_funnel_reference['Расход, ₽']
             .astype(str)
-            .str.replace(' ', '', regex=False)  # NBSP
+            .str.replace('\u00A0', '', regex=False)  # NBSP
             .str.replace(' ',      '', regex=False)  # обычные пробелы
             .str.replace('₽',      '', regex=False)
             .str.replace(',',      '.', regex=False),  # ВАЖНО: str.replace, не replace
@@ -1122,7 +1086,7 @@ def assemble():
         'Показы в поиске и каталоге', 'Позиция в поиске и каталоге',
         'В корзину, всего', 'Заказано товаров', 'Отменено товаров',
         'Доставлено товаров', 'Возвращено товаров', 'Заказано на сумму',
-        'В корзину из карточки товара', 'Выкупили ШТ',
+        'В корзину из карточки товара', 'Выкупили ШТ', 
         'Расход, ₽', 'Рекламные заказано на сумму',
         'Рекламные заказано товаров', 'Рекламные показы',
         'Рекламные показы на карточке товара', 'Цена'
@@ -1148,7 +1112,7 @@ def assemble():
         'Показы в поиске и каталоге', 'Позиция в поиске и каталоге',
         'В корзину, всего', 'Заказано товаров', 'Отменено товаров',
         'Доставлено товаров', 'Возвращено товаров', 'Заказано на сумму',
-        'В корзину из карточки товара', 'Выкупили ШТ',
+        'В корзину из карточки товара', 'Выкупили ШТ', 
         'Расход, ₽', 'Рекламные заказано на сумму',
         'Рекламные заказано товаров', 'Рекламные показы',
         'Рекламные показы на карточке товара', 'Цена'
@@ -1266,7 +1230,7 @@ def assemble():
 
         # присоединяем ИТОГИ (истина) строго m:1
         core = core.merge(totals_df, on=key_cols, how='left', validate='m:1')
-
+        
         # ---- 6) ДОП. колонки из df_raw (НЕ участвуют в расчётах) ----
         exclude = set(key_cols + metric_cols)
         extra_cols = [c for c in df_raw.columns if c not in exclude]
@@ -1348,17 +1312,11 @@ def assemble():
     out = out[final_after_widing_columns]
     df_funnel_reference = out
 
-    print(f"\n{'='*60}")
-    print(f"[DIAG] После build_funnel_wide: {len(df_funnel_reference):,} строк, {len(df_funnel_reference.columns)} колонок")
-    print(f"[DIAG] Уник. (Дата, Артикул): {df_funnel_reference.groupby(['Дата','Артикул']).ngroups:,}")
-    print(f"{'='*60}\n")
-
     # 15. Связать "ВоронкаСправочник" с "Остатки с дистрибуцией"
     try:
         print("Начинаем создавать таблицу ДБбезПризнаков...")
         start_time = time.time()  # Запускаем таймер
         df_stock_with_distribution['Дата'] = pd.to_datetime(df_stock_with_distribution['Дата'])
-        print(f"[DIAG] df_stock_with_distribution: {len(df_stock_with_distribution):,} строк, уник. (Дата,Артикул): {df_stock_with_distribution.groupby(['Дата','Артикул']).ngroups:,}")
         df_final_db = pd.merge(df_funnel_reference, df_stock_with_distribution, left_on=["Дата", "Артикул"], right_on=["Дата", "Артикул"], how="left")
         df_final_db = format_date_column(df_final_db, 'Дата')
 
@@ -1407,10 +1365,7 @@ def assemble():
     try:
         print("Начинаем создавать таблицу ДБсПризнакамиАртикула...")
         start_time = time.time()  # Запускаем таймер
-        print(f"[DIAG] df_final_db перед item_features merge: {len(df_final_db):,} строк")
-        print(f"[DIAG] df_item_features: {len(df_item_features):,} строк, уник. Артикул: {df_item_features['Артикул'].nunique():,}")
         df_final_db_item_features = pd.merge(df_final_db, df_item_features, left_on=["Артикул"], right_on=["Артикул"], how="left")
-        print(f"[DIAG] После item_features merge: {len(df_final_db_item_features):,} строк (x{len(df_final_db_item_features)/len(df_final_db):.2f})")
         df_final_db_item_features = format_date_column(df_final_db_item_features, 'Дата')
 
         # Вывод первых 5 строк
@@ -1428,9 +1383,7 @@ def assemble():
     try:
         print("Начинаем создавать таблицу ДБсПризнаками...")
         start_time = time.time()
-        print(f"[DIAG] df_date_features: {len(df_date_features):,} строк, уник. Дата: {df_date_features['Дата'].nunique():,}")
         df_final_db_all_features = pd.merge(df_final_db_item_features, df_date_features, on="Дата", how="left")
-        print(f"[DIAG] После date_features merge: {len(df_final_db_all_features):,} строк (x{len(df_final_db_all_features)/len(df_final_db_item_features):.2f})")
         df_final_db_all_features = format_date_column(df_final_db_all_features, 'Дата')
 
         print("Первые 5 строк таблицы ДБсПризнаками:")
@@ -1493,22 +1446,14 @@ def assemble():
         ,sku.[article]
         ,scepka.[updated_at] as [Дата Обновления]
     FROM [DBReport].[mp].[ozon_scepka] scepka
-    JOIN [DBReport].[mp].[ozon_sku] sku
-    ON  scepka.[product_id] = sku.[product_id]
+    JOIN [DBReport].[mp].[ozon_sku] sku 
+    ON  scepka.[product_id] = sku.[product_id] 
     and sku.actual = 1
     """
     df_links = pd.read_sql(sql, engine)
     df_links['Артикул OZ'] = df_links['Артикул OZ'].astype(str)
     df_links.to_excel(os.path.join(FOLDER_PATH, f"Склейки товаров\\OZ\\{df_links['Дата Обновления'].iloc[0].strftime('%d.%m.%Y')}_Склейка Товаров_OZ.xlsx"))
-    df_links_unique = (df_links[["Артикул OZ", "Текущая склейка"]]
-                       .drop_duplicates(subset=["Артикул OZ"], keep="first"))
-    _before_rows = len(df_final_db_all_features)
-    df_final_db_all_features = pd.merge(df_final_db_all_features, df_links_unique, how='left', on='Артикул OZ')
-    _after_rows = len(df_final_db_all_features)
-    if _after_rows != _before_rows:
-        print(f"[WARN] Склейки merge изменил кол-во строк: {_before_rows} → {_after_rows}")
-    else:
-        print(f"[OK] Склейки merge: строк {_after_rows}, без дубликатов")
+    df_final_db_all_features = pd.merge(df_final_db_all_features, df_links[["Артикул OZ", "Текущая склейка"]], how='left', on='Артикул OZ')
 
 
     print('Shape df_final_db_all_features: ' + str(df_final_db_all_features.shape))
@@ -1627,12 +1572,6 @@ def assemble():
         raise RuntimeError(f"[v2] После переименования возникли дубликаты колонок: {dup}")
 
     print(f"[v2] Колонок после переименования: {len(cols)}; дубликатов: 0")
-
-    # Страховка: удаляем любые «Артикул OZ_x» / «Артикул OZ_y» если они просочились
-    _bad = [c for c in df_final_db_all_features.columns if c.startswith("Артикул OZ_")]
-    if _bad:
-        print(f"[WARN] Обнаружены лишние колонки {_bad} — удаляем перед сохранением")
-        df_final_db_all_features.drop(columns=_bad, inplace=True)
 
     # 22 [v2]. Сохранить df_final_db_all_features в ТЕСТОВЫЙ csv (не перетирая боевой)
     table = pa.Table.from_pandas(df_final_db_all_features)
@@ -1768,9 +1707,9 @@ def assemble():
             elapsed_time = time.time() - start_time  # Вычисляем затраченное время
             print(f"Файл успешно обновлен и сохранен. Время выполнения: {format_elapsed_time(elapsed_time)}")
         else:
-            print("Файл 'Показы и затраты ОЗ_2.0.xlsx' не найден.")
+            print("Файл 'Показы и затраты ОЗ_2.0.xlsx_Test' не найден.")
     except Exception as e:
-        print(f"Ошибка при обработке файла 'Показы и затраты ОЗ_2.0.xlsx': {e}")
+        print(f"Ошибка при обработке файла 'Показы и затраты ОЗ_2.0.xlsx_Test': {e}")
 
 if __name__ == "__main__":
     assemble()

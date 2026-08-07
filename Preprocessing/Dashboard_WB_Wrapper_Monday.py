@@ -311,9 +311,9 @@ def main():
     unify_columns(voronka_wb_1)
     unify_columns(voronka_wb_2)
     unify_columns(voronka_wb_3)
-    # copy_latest_cost_history() # 2
-    update_latest_week_file()
-    update_zatraty_wb2()
+    copy_latest_cost_history() # 2
+    # update_latest_week_file()
+    # update_zatraty_wb2()
 
     # Запускаем скрипт
     # subprocess.run(['DB_WB_1.1.exe'], check=True)
