@@ -129,6 +129,20 @@ def _shorten_columns(columns):
     return result
 
 
+def _sanitize_columns(df):
+    """Заменяет спецсимволы в именах колонок, недопустимые в именованных параметрах psycopg2."""
+    import re
+    rename = {}
+    for col in df.columns:
+        clean = re.sub(r"[^0-9a-zA-Zа-яА-ЯёЁ_]", "_", col)
+        clean = re.sub(r"_+", "_", clean).strip("_")
+        if clean != col:
+            rename[col] = clean
+    if rename:
+        df = df.rename(columns=rename)
+    return df
+
+
 def _safe_print(msg):
     try:
         print(msg)
@@ -151,6 +165,7 @@ def read_last_day(csv_path=CSV_PATH):
     Читает CSV и возвращает DataFrame только с данными последнего дня.
     """
     df = pd.read_csv(csv_path, encoding="utf-8", low_memory=False)
+    df = _sanitize_columns(df)
 
     if DATE_COLUMN not in df.columns:
         raise ValueError(f"В CSV нет колонки '{DATE_COLUMN}'. Колонки: {list(df.columns[:10])}...")
@@ -182,7 +197,7 @@ def _table_exists(conn, schema, table):
     return result.scalar()
 
 
-def upload_to_postgres(df, report_date, engine, batch_size=200):
+def upload_to_postgres(df, report_date, engine, batch_size=100):
     """
     Идемпотентная загрузка: DELETE по дате + INSERT.
     При первом запуске таблица создаётся автоматически через to_sql.
@@ -246,6 +261,7 @@ def try_upload_latest_to_postgres(config_path=None, csv_path=CSV_PATH):
 
 def _read_full_csv(csv_path=CSV_PATH):
     df = pd.read_csv(csv_path, encoding="utf-8", low_memory=False)
+    df = _sanitize_columns(df)
     if DATE_COLUMN not in df.columns:
         raise ValueError(f"В CSV нет колонки '{DATE_COLUMN}'. Колонки: {list(df.columns[:10])}...")
     df[DATE_COLUMN] = pd.to_datetime(df[DATE_COLUMN], dayfirst=True, errors="coerce")
@@ -263,7 +279,7 @@ def _get_existing_dates(engine):
     return {row[0] for row in rows}
 
 
-def upload_missing_days_to_postgres(config_path=None, csv_path=CSV_PATH, batch_size=200):
+def upload_missing_days_to_postgres(config_path=None, csv_path=CSV_PATH, batch_size=100):
     """
     Догрузка недостающих дней: сравнивает даты в CSV и в SQL,
     загружает только те дни, которых нет в таблице.
@@ -310,7 +326,7 @@ def upload_missing_days_to_postgres(config_path=None, csv_path=CSV_PATH, batch_s
         engine.dispose()
 
 
-def upload_full_csv_to_postgres(config_path=None, csv_path=CSV_PATH, batch_size=200):
+def upload_full_csv_to_postgres(config_path=None, csv_path=CSV_PATH, batch_size=100):
     """
     Полная перезаливка CSV в PostgreSQL.
     Дропает таблицу и загружает все строки заново, по одной дате за итерацию.

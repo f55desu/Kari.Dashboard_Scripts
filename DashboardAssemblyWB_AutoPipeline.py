@@ -42,7 +42,7 @@ from Preprocessing.wb_downloader_v2 import download_wb_report_v2
 from Preprocessing.wb_campaign_downloader import download_wb_campaign_report
 from DashboardDBUploaderWB import try_upload_latest_to_postgres as try_upload_dashboard_to_postgres
 
-import DashboardAssemblyWB
+import DashboardAssemblyWB as DashboardAssemblyWB
 
 import logging
 
@@ -59,47 +59,47 @@ output_dir=r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
 def main():
     def run_postgres_tunnel():
         subprocess.run([r'pgadmin_connect.bat'])
-    try:
-        download_wb_report_v2()
-        download_wb_campaign_report()
-        print("WB Report and Campaign Report downloaded successfully")
-        logging.info("WB Report and Campaign Report downloaded successfully")
-    except Exception as e:
-        print(f"Error in download_wb_report_v2 or download_wb_campaign_report: {e}")
-        logging.info(f"Error in download_wb_report_v2 or download_wb_campaign_report: {e}")
-        return False
+    # try:
+    #     download_wb_report_v2()
+    #     download_wb_campaign_report()
+    #     print("WB Report and Campaign Report downloaded successfully")
+    #     logging.info("WB Report and Campaign Report downloaded successfully")
+    # except Exception as e:
+    #     print(f"Error in download_wb_report_v2 or download_wb_campaign_report: {e}")
+    #     logging.info(f"Error in download_wb_report_v2 or download_wb_campaign_report: {e}")
+    #     return False
 
-    wrapper_modules = {  # pyright: ignore[reportUnreachable]
-            "wrapper": ("Dashboard_WB_Wrapper.py", WB_Wrapper),
-            "wrapper_tuesday": ("Dashboard_WB_Wrapper_Tuesday.py", WB_Wrapper_Tuesday)
-        }
+    # wrapper_modules = {  # pyright: ignore[reportUnreachable]
+    #         "wrapper": ("Dashboard_WB_Wrapper.py", WB_Wrapper),
+    #         "wrapper_tuesday": ("Dashboard_WB_Wrapper_Tuesday.py", WB_Wrapper_Tuesday)
+    #     }
         
-    if date.today().weekday() == 1:
-        wrapper_file, wrapper_module = wrapper_modules["wrapper_tuesday"]
-    else:
-        wrapper_file, wrapper_module = wrapper_modules["wrapper"]
+    # if date.today().weekday() == 1:
+    #     wrapper_file, wrapper_module = wrapper_modules["wrapper_tuesday"]
+    # else:
+    #     wrapper_file, wrapper_module = wrapper_modules["wrapper"]
 
-    logging.info(f"▶️ Запуск скрипта: {wrapper_file}")
-    logging.info("─" * 60)
+    # logging.info(f"▶️ Запуск скрипта: {wrapper_file}")
+    # logging.info("─" * 60)
     
-    try:
-        # Вызываем main() функцию напрямую
-        logging.info("🔄 Выполнение скрипта обработки данных WB...")
-        wrapper_module.main()
-        logging.info("✅ Скрипт выполнен успешно")
+    # try:
+    #     # Вызываем main() функцию напрямую
+    #     logging.info("🔄 Выполнение скрипта обработки данных WB...")
+    #     wrapper_module.main()
+    #     logging.info("✅ Скрипт выполнен успешно")
         
-        logging.info("─" * 60)
-        logging.info("🎉 ВСЕ ЭТАПЫ УСПЕШНО ВЫПОЛНЕНЫ!")
+    #     logging.info("─" * 60)
+    #     logging.info("🎉 ВСЕ ЭТАПЫ УСПЕШНО ВЫПОЛНЕНЫ!")
         
-        # Записываем в лог-файл
-        logging.info(f'{datetime.now()} - {wrapper_file} completed via GUI\n')
+    #     # Записываем в лог-файл
+    #     logging.info(f'{datetime.now()} - {wrapper_file} completed via GUI\n')
         
-    except Exception as e:
-        error_message = f"❌ ОШИБКА: {str(e)}"
-        logging.info(error_message)
-        # Записываем ошибку в лог-файл
-        logging.info(f'{datetime.now()} - ERROR in {wrapper_file}: {str(e)}\n')
-        return False
+    # except Exception as e:
+    #     error_message = f"❌ ОШИБКА: {str(e)}"
+    #     logging.info(error_message)
+    #     # Записываем ошибку в лог-файл
+    #     logging.info(f'{datetime.now()} - ERROR in {wrapper_file}: {str(e)}\n')
+    #     return False
 
 
     logging.info("▶️ Запуск скрипта: DashboardAssemblyWB.py")

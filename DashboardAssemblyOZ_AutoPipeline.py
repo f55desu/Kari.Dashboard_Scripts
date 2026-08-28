@@ -34,6 +34,8 @@ if os.path.exists(prep_path) and prep_path not in sys.path:
     sys.path.insert(0, prep_path)
 
 from datetime import date, datetime, timedelta
+import socket
+import time
 
 # Direct imports of wrapper scripts
 import Preprocessing.Dashboard_OZON_Wrapper as Ozon_Wrapper
@@ -42,7 +44,7 @@ from Preprocessing.ozon_analytics_downloader import download_ozon_analytics_repo
 from Preprocessing.ozon_funnel_api_downloader import download_ozon_funnel_report
 from DashboardDBUploaderOZ import try_upload_latest_to_postgres as try_upload_dashboard_to_postgres
 
-import DashboardAssemblyOZ
+import DashboardAssemblyOZ as DashboardAssemblyOZ
 
 import logging
 
@@ -56,56 +58,108 @@ logging.basicConfig(
 
 output_dir=r"\\kari.local\public\all\Analytics\Marketplaceanalytics\Taldykin"
 
+def _is_port_open(host="localhost", port=15432, timeout=2):
+    """Проверяет, слушается ли порт."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (ConnectionRefusedError, OSError, TimeoutError):
+        return False
+
+
+def ensure_postgres_tunnel(max_wait=15):
+    """Проверяет SSH-туннель к PostgreSQL. Если не поднят — запускает и ждёт."""
+    if _is_port_open():
+        logging.info("SSH-туннель PostgreSQL уже активен (порт 15432)")
+        return True
+
+    logging.info("SSH-туннель не обнаружен — запускаю...")
+    print("SSH-туннель PostgreSQL не активен — запускаю...")
+
+    ssh_exe = r"C:\Program Files\Git\usr\bin\ssh.exe"
+    if not os.path.exists(ssh_exe):
+        ssh_exe = r"C:\Users\i.taldykin\AppData\Local\Programs\Git\usr\bin\ssh.exe"
+
+    subprocess.Popen(
+        [ssh_exe, "-o", "StrictHostKeyChecking=no",
+         "-N", "-L", "15432:localhost:25432", "cc@ru-mow-d1-sap41"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+    for i in range(max_wait):
+        time.sleep(1)
+        if _is_port_open():
+            logging.info(f"SSH-туннель поднят за {i + 1} сек.")
+            print(f"SSH-туннель поднят за {i + 1} сек.")
+            return True
+
+    logging.warning(f"SSH-туннель не поднялся за {max_wait} сек.")
+    print(f"⚠ SSH-туннель не поднялся за {max_wait} сек.")
+    return False
+
+
 def main():
     def run_postgres_tunnel():
         subprocess.run([r'pgadmin_connect.bat'])
 
-    try:
-        download_ozon_analytics_report() # Deprecated scripted web downloading
-        # download_ozon_funnel_report() # API Call function
-        download_ozon_ad_report() # Deprecated scripted web downloading
-        print("OZON Analytics and Ad Report downloaded successfully")
-        logging.info("OZON Analytics and Ad Report downloaded successfully")
-    except Exception as e:
-        print(f"Error in download_ozon_analytics_report or download_ozon_ad_report: {e}")
-        logging.info(f"Error in download_ozon_analytics_report or download_ozon_ad_report: {e}")
+    # try:
+    #     download_ozon_analytics_report() # Deprecated scripted web downloading
+    #     # download_ozon_funnel_report() # API Call function
+    #     download_ozon_ad_report() # Deprecated scripted web downloading
+    #     print("OZON Analytics and Ad Report downloaded successfully")
+    #     logging.info("OZON Analytics and Ad Report downloaded successfully")
+    # except Exception as e:
+    #     print(f"Error in download_ozon_analytics_report or download_ozon_ad_report: {e}")
+    #     logging.info(f"Error in download_ozon_analytics_report or download_ozon_ad_report: {e}")
+    #     return False
+
+    # wrapper_modules = {  # pyright: ignore[reportUnreachable]
+    #         "wrapper": ("Dashboard_OZON_Wrapper.py", Ozon_Wrapper),
+    #     }
+        
+    # wrapper_file, wrapper_module = wrapper_modules["wrapper"]
+        
+    # logging.info(f"▶️ Запуск скрипта: {wrapper_file}")
+    # logging.info("─" * 60)
+    
+    # try:
+    #     # Вызываем main() функцию напрямую
+    #     logging.info("🔄 Выполнение скрипта обработки данных OZON...")
+    #     wrapper_module.main()
+    #     logging.info("✅ Скрипт выполнен успешно")
+        
+    #     logging.info("─" * 60)
+    #     logging.info("🎉 ВСЕ ЭТАПЫ УСПЕШНО ВЫПОЛНЕНЫ!")
+        
+    #     # Записываем в лог-файл
+    #     logging.info(f'{datetime.now()} - {wrapper_file} completed via GUI\n')
+        
+    # except Exception as e:
+    #     error_message = f"❌ ОШИБКА: {str(e)}"
+    #     logging.info(error_message)
+    #     # Записываем ошибку в лог-файл
+    #     logging.info(f'{datetime.now()} - ERROR in {wrapper_file}: {str(e)}\n')
+    #     return False
+
+
+    # Перед сборкой SQL-based дашборда убеждаемся, что SSH-туннель к PG поднят
+    logging.info("▶️ Проверка SSH-туннеля PostgreSQL перед сборкой...")
+    tunnel_ok = ensure_postgres_tunnel()
+    if not tunnel_ok:
+        logging.warning("⚠️ SSH-туннель не поднялся — пробуем через pgadmin_connect.bat...")
+        run_postgres_tunnel()
+        tunnel_ok = _is_port_open()
+
+    if not tunnel_ok:
+        logging.error("❌ PostgreSQL недоступен — сборка SQL-based дашборда невозможна")
+        print("❌ PostgreSQL недоступен — сборка SQL-based дашборда невозможна")
         return False
 
-    wrapper_modules = {  # pyright: ignore[reportUnreachable]
-            "wrapper": ("Dashboard_OZON_Wrapper.py", Ozon_Wrapper),
-        }
-        
-    wrapper_file, wrapper_module = wrapper_modules["wrapper"]
-        
-    logging.info(f"▶️ Запуск скрипта: {wrapper_file}")
+    logging.info("▶️ Запуск скрипта: DashboardAssemblyOZ_SQLBased.py")
+    logging.info("📦 Сборка дашборда OZON (SQL-based)...")
     logging.info("─" * 60)
     
     try:
-        # Вызываем main() функцию напрямую
-        logging.info("🔄 Выполнение скрипта обработки данных OZON...")
-        wrapper_module.main()
-        logging.info("✅ Скрипт выполнен успешно")
-        
-        logging.info("─" * 60)
-        logging.info("🎉 ВСЕ ЭТАПЫ УСПЕШНО ВЫПОЛНЕНЫ!")
-        
-        # Записываем в лог-файл
-        logging.info(f'{datetime.now()} - {wrapper_file} completed via GUI\n')
-        
-    except Exception as e:
-        error_message = f"❌ ОШИБКА: {str(e)}"
-        logging.info(error_message)
-        # Записываем ошибку в лог-файл
-        logging.info(f'{datetime.now()} - ERROR in {wrapper_file}: {str(e)}\n')
-        return False
-
-
-    logging.info("▶️ Запуск скрипта: DashboardAssemblyOZ.py")
-    logging.info("📦 Сборка дашборда OZON...")
-    logging.info("─" * 60)
-    
-    try:
-        # Вызываем main() функцию напрямую
         logging.info("🔄 Выполнение скрипта сборки дашборда OZON...")
         DashboardAssemblyOZ.assemble()
         logging.info("✅ Скрипт выполнен успешно")
@@ -113,7 +167,7 @@ def main():
         logging.info("─" * 60)
         logging.info("🎉 СБОРКА ДАШБОРДА ЗАВЕРШЕНА!")
         
-        logging.info('DashboardAssemblyOZ.py completed via Pipeline')
+        logging.info('DashboardAssemblyOZ_SQLBased.py completed via Pipeline')
 
         logging.info("▶️ Загрузка последнего дня дашборда в PostgreSQL...")
         try:
@@ -121,8 +175,8 @@ def main():
             if ok:
                 logging.info("✅ Загрузка дашборда в PostgreSQL завершена успешно")
             else:
-                logging.warning("⚠️ Загрузка дашборда в PostgreSQL произошла с ошибкой. Возможно не был поднят тунель Postgres. Поднимаем тунель")
-                run_postgres_tunnel()
+                logging.warning("⚠️ Загрузка дашборда в PostgreSQL произошла с ошибкой. Поднимаем туннель...")
+                ensure_postgres_tunnel()
                 ok = try_upload_dashboard_to_postgres()
                 if ok:
                     logging.info("✅ Загрузка дашборда в PostgreSQL завершена успешно")
