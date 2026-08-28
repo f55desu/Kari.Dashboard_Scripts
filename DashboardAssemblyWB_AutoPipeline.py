@@ -42,7 +42,7 @@ from Preprocessing.wb_downloader_v2 import download_wb_report_v2
 from Preprocessing.wb_campaign_downloader import download_wb_campaign_report
 from DashboardDBUploaderWB import try_upload_latest_to_postgres as try_upload_dashboard_to_postgres
 
-import DashboardAssemblyWB
+import DashboardAssemblyWB as DashboardAssemblyWB
 
 import logging
 

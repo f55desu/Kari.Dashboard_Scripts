@@ -156,6 +156,54 @@ def assemble():
     df_costs_hist = df_costs_hist[['Кампания', 'ID кампании', 'Раздел']]
     df_costs_hist['Раздел'] = df_costs_hist['Раздел'].astype(str)
 
+    # ================================================================
+    # 2.5 Получить данные Продаж из [DBReport].[mp].[wb_sales_report]
+    #     Два общих итога по (Дата, Артикул WB), БЕЗ разбивки по разделам:
+    #       Продажи, руб  = GMV net  (Продажа + / Возврат -)
+    #       Продажи, шт = Кол-во net (Продажа + / Возврат -)
+    #     Ключ wb_sales_report — [Артикул поставщика] (itemid Кари),
+    #     маппим в [Артикул WB] (nmID) через WblmRepGetNomenclatureWildberries
+    #     (по одному nmID на itemid, чтобы не размножать продажи).
+    # ================================================================
+    try:
+        print(f"Начинаем получать данные Продаж из [mp].[wb_sales_report] (с {pg_date_from})...")
+        start_time = time.time()
+
+        Engine = connect_to_sql(SQL_SERVER, SQL_DATABASE_DBREPORT)
+        query_sales = f"""
+            SELECT
+                CAST(s.[Дата продажи] AS date) AS [Дата],
+                m.[NMID]                       AS [Артикул WB],
+                SUM(CASE WHEN s.[Тип документа] = N'Продажа' THEN s.[Цена розничная]
+                         WHEN s.[Тип документа] = N'Возврат' THEN -s.[Цена розничная]
+                         ELSE 0 END)           AS [Продажи, руб],
+                SUM(CASE WHEN s.[Тип документа] = N'Продажа' THEN s.[Кол-во]
+                         WHEN s.[Тип документа] = N'Возврат' THEN -s.[Кол-во]
+                         ELSE 0 END)           AS [Продажи, шт]
+            FROM [DBReport].[mp].[wb_sales_report] s
+            INNER JOIN (
+                SELECT [ITEMID], MAX([NMID]) AS [NMID]
+                FROM [DBPartners].[dbo].[WblmRepGetNomenclatureWildberries]
+                WHERE [NMID] IS NOT NULL
+                GROUP BY [ITEMID]
+            ) m
+                ON UPPER(s.[Артикул поставщика]) = UPPER(m.[ITEMID])
+            WHERE s.[Дата продажи] >= '{pg_date_from}'
+            GROUP BY CAST(s.[Дата продажи] AS date), m.[NMID]
+        """
+        df_sales = pd.read_sql(query_sales, Engine)
+        df_sales['Артикул WB'] = df_sales['Артикул WB'].fillna('').astype(str).str.strip().str.upper()
+        df_sales = format_date_column(df_sales, 'Дата')
+
+        print("Первые 5 строк таблицы Продажи:")
+        print(df_sales.head())
+
+        elapsed_time = time.time() - start_time
+        print(f"Данные Продаж успешно загружены. Время выполнения: {format_elapsed_time(elapsed_time)}")
+    except Exception as e:
+        print(f"Ошибка при получении данных Продаж: {e}")
+        df_sales = pd.DataFrame(columns=['Дата', 'Артикул WB', 'Продажи, руб', 'Продажи, шт'])
+
     # 3. Создание широкой таблицы по типам активности
     TYPE_DICT_RAW = {}
 
@@ -578,6 +626,33 @@ def assemble():
         return df
 
     df_funnel_expenses = build_funnel_expenses_outer(df_funnel, df_expenses)
+
+    # 7.5 Добавить Продажи (Продажи, руб, Продажи, шт) по (Дата, Артикул WB).
+    #     Мёржим ПОСЛЕ широкой таблицы — как общие итоги, без разбивки по Типам активности.
+    try:
+        print("Начинаем добавлять Продажи в df_funnel_expenses...")
+        start_time = time.time()
+
+        df_funnel_expenses['Артикул WB'] = (df_funnel_expenses['Артикул WB']
+            .fillna('').astype(str).str.strip().str.upper())
+
+        df_funnel_expenses = pd.merge(
+            df_funnel_expenses,
+            df_sales,
+            on=['Дата', 'Артикул WB'],
+            how='left'
+        )
+        df_funnel_expenses[['Продажи, руб', 'Продажи, шт']] = (
+            df_funnel_expenses[['Продажи, руб', 'Продажи, шт']].fillna(0)
+        )
+
+        print("Первые 5 строк df_funnel_expenses с Продажами:")
+        print(df_funnel_expenses[['Дата', 'Артикул WB', 'Продажи, руб', 'Продажи, шт']].head())
+
+        elapsed_time = time.time() - start_time
+        print(f"Продажи успешно добавлены. Время выполнения: {format_elapsed_time(elapsed_time)}")
+    except Exception as e:
+        print(f"Ошибка при добавлении Продаж в df_funnel_expenses: {e}")
 
 
 

@@ -87,6 +87,56 @@ def assemble():
     cutoff = (pd.Timestamp.today() - pd.DateOffset(days=PG_LOOKBACK_DAYS)).strftime("%Y-%m-%d")
 
     # =================================================================
+    # 0.5 Продажи из [DBReport].[mp].[ozon_reports] (аналог ВБ).
+    #     Два ОБЩИХ итога по (Дата, Артикул), БЕЗ разбивки по ТипАктивности:
+    #       Продажи, руб  = SUM(accruals_for_sale)            (GMV, с НДС)
+    #       Продажи, шт = +1 доставка / -1 возврат-сторно   (нет колонки кол-ва)
+    #     У ozon_reports нет артикула — берём его через мост
+    #       posting_number -> partner.OzonOrder.PostingNumber -> ItemId
+    #     (ItemId = артикул Кари, lowercase; в SQL приводим к UPPER).
+    # =================================================================
+    try:
+        print(f"Начинаем получать данные Продаж Ozon из [mp].[ozon_reports] (с {cutoff})...")
+        start_time = time.time()
+
+        engine_report = connect_to_sql(SQL_SERVER, SQL_DATABASE_DBREPORT)
+        query_sales_oz = f"""
+            SELECT
+                CAST(r.[operation_date] AS date) AS [Дата],
+                UPPER(o.[ItemId])                AS [Артикул],
+                SUM(r.[accruals_for_sale])       AS [Продажи, руб],
+                SUM(CASE WHEN r.[operation_type] = 'OperationAgentDeliveredToCustomer'
+                         THEN 1 ELSE -1 END)     AS [Продажи, шт]
+            FROM [DBReport].[mp].[ozon_reports] r
+            INNER JOIN (
+                SELECT DISTINCT [PostingNumber], [ItemId]
+                FROM [DBReport].[partner].[OzonOrder]   -- ⚠ уточнить БД: DBReport или DBPartners
+            ) o
+                ON r.[posting_number] = o.[PostingNumber]
+            WHERE r.[operation_type] IN (
+                    'OperationAgentDeliveredToCustomer',        -- доставка (продажа)  +1
+                    'ClientReturnAgentOperation',               -- возврат клиента     -1
+                    'OperationAgentStornoDeliveredToCustomer'   -- сторно доставки     -1
+                )
+              AND r.[operation_date] >= '{cutoff}'
+            GROUP BY CAST(r.[operation_date] AS date), UPPER(o.[ItemId])
+        """
+        df_sales_oz = pd.read_sql(query_sales_oz, engine_report)
+        df_sales_oz['Дата'] = pd.to_datetime(df_sales_oz['Дата'], errors='coerce').dt.normalize()
+        df_sales_oz['Артикул'] = df_sales_oz['Артикул'].fillna('').astype(str).str.strip().str.upper()
+        df_sales_oz['Продажи, руб'] = pd.to_numeric(df_sales_oz['Продажи, руб'], errors='coerce').fillna(0.0)
+        df_sales_oz['Продажи, шт'] = pd.to_numeric(df_sales_oz['Продажи, шт'], errors='coerce').fillna(0)
+
+        print("Первые 5 строк таблицы Продажи Ozon:")
+        print(df_sales_oz.head())
+
+        elapsed_time = time.time() - start_time
+        print(f"Данные Продаж Ozon успешно загружены. Время выполнения: {format_elapsed_time(elapsed_time)}")
+    except Exception as e:
+        print(f"Ошибка при получении данных Продаж Ozon: {e}")
+        df_sales_oz = pd.DataFrame(columns=['Дата', 'Артикул', 'Продажи, руб', 'Продажи, шт'])
+
+    # =================================================================
     # 1. Воронка (из PostgreSQL work.ozon_sales_funnel)
     # =================================================================
     df_voronka = pd.read_sql(
@@ -1347,6 +1397,39 @@ def assemble():
     final_after_widing_columns = [c for c in final_after_widing_columns if c in out.columns]
     out = out[final_after_widing_columns]
     df_funnel_reference = out
+
+    # 14.5 Добавить Продажи (Продажи, руб, Продажи, шт) по (Дата, Артикул).
+    #      Мёржим ПОСЛЕ виджена — как общие итоги, без разбивки по ТипАктивности.
+    try:
+        print("Добавляем Продажи Ozon в df_funnel_reference...")
+        _sales_before = len(df_funnel_reference)
+
+        df_funnel_reference['Дата'] = pd.to_datetime(df_funnel_reference['Дата'], errors='coerce').dt.normalize()
+        df_funnel_reference['_sku_key'] = (df_funnel_reference['Артикул']
+            .fillna('').astype(str).str.strip().str.upper())
+
+        _sales_join = df_sales_oz.copy()
+        _sales_join['_sku_key'] = _sales_join['Артикул'].fillna('').astype(str).str.strip().str.upper()
+        _sales_join = _sales_join.drop_duplicates(subset=['Дата', '_sku_key'], keep='first')
+
+        df_funnel_reference = df_funnel_reference.merge(
+            _sales_join[['Дата', '_sku_key', 'Продажи, руб', 'Продажи, шт']],
+            on=['Дата', '_sku_key'],
+            how='left',
+            validate='m:1'
+        )
+        df_funnel_reference.drop(columns=['_sku_key'], inplace=True)
+        df_funnel_reference[['Продажи, руб', 'Продажи, шт']] = (
+            df_funnel_reference[['Продажи, руб', 'Продажи, шт']].fillna(0)
+        )
+
+        assert len(df_funnel_reference) == _sales_before, \
+            f"Мёрж Продаж раздул строки: {_sales_before} -> {len(df_funnel_reference)}"
+
+        _matched = (df_funnel_reference['Продажи, шт'] != 0).sum()
+        print(f"  Продажи присвоены {_matched:,} строкам из {_sales_before:,}")
+    except Exception as e:
+        print(f"Ошибка при добавлении Продаж Ozon в df_funnel_reference: {e}")
 
     print(f"\n{'='*60}")
     print(f"[DIAG] После build_funnel_wide: {len(df_funnel_reference):,} строк, {len(df_funnel_reference.columns)} колонок")
